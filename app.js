@@ -219,9 +219,11 @@ async function protectedSetMonthlyLimit(month,amount,pin){
 async function ensureBudgetAdminPinSetup(){
   if(await budgetAdminConfigured()) return true;
   const loginPin=prompt('가용금액 관리 PIN을 처음 설정합니다. 현재 가계부 접속 PIN을 입력하세요.'); if(loginPin===null) return false;
+  const loginHash=await sha256(loginPin);
+  if(!PIN_HASH || loginHash!==PIN_HASH){ alert('현재 가계부 접속 PIN이 올바르지 않습니다.'); return false; }
   const newPin=prompt('가용금액 수정에 사용할 별도 관리 PIN을 숫자 4~12자리로 입력하세요.'); if(newPin===null) return false;
   if(!/^\d{4,12}$/.test(newPin)){ alert('관리 PIN은 숫자 4~12자리여야 합니다.'); return false; }
-  const loginHash=await sha256(loginPin), adminHash=await sha256(newPin);
+  const adminHash=await sha256(newPin);
   await fetch(API_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'setBudgetAdminPin',payload:{loginPinHash:loginHash,adminPinHash:adminHash}})});
   alert('가용금액 관리 PIN을 설정했습니다. 잠시 후부터 사용됩니다.'); return true;
 }
@@ -275,10 +277,10 @@ function renderAdd(){
       <div class="metric budget-summary-item">
         <div class="metric-label">이번 달 사용가능 금액</div>
         <div class="metric-value">${won(s.limit)}</div>
-        <button class="budget-limit-link" id="editLimitBtn" type="button">가용금액 설정</button>
+        <button class="budget-limit-button" id="editLimitBtn" type="button" aria-label="가용금액 설정" title="가용금액 설정">✎</button>
       </div>
       <div class="metric budget-summary-item">
-        <div class="metric-label">예산 반영 지출</div>
+        <div class="metric-label">생활예산 사용액</div>
         <div class="metric-value">${won(s.budgetVariable)}</div>
         <div class="metric-foot">카드고정지출·이벤트 제외</div>
       </div>
@@ -294,10 +296,15 @@ function renderAdd(){
     </div>
     <div class="grid cols-2 section-gap">
       <div class="card">
-        <div class="card-head"><div><h2>변동지출 등록</h2><p>생활비·식비·이벤트는 세부 항목을 바로 선택할 수 있습니다.</p></div><button class="btn small" id="copyCardFixedBtn" type="button">전월 카드고정지출 복사</button></div>
-        <div class="quick-cats" id="quickCats">${options.map((o,i)=>`<button type="button" class="chip ${i===0?'active':''}" data-value="${esc(o.value)}">${esc(o.label)}</button>`).join('')}</div>
+        <div class="card-head"><div><h2>변동지출 등록</h2><p>생활비·식비·이벤트는 세부 항목을 바로 선택할 수 있습니다.</p></div><button class="btn small copy-fixed-btn" id="copyCardFixedBtn" type="button">전월 카드고정지출 복사</button></div>
+        <div class="quick-cat-groups" id="quickCats">
+          <div class="quick-cat-group fixed-group"><span class="quick-cat-label">고정</span><div class="quick-cats">${options.filter(o=>o.value==='고정').map((o,i)=>`<button type="button" class="chip chip-fixed ${i===0?'active':''}" data-value="${esc(o.value)}">${esc(o.label)}</button>`).join('')}</div></div>
+          <div class="quick-cat-group living-group"><span class="quick-cat-label">생활비</span><div class="quick-cats">${options.filter(o=>o.value.startsWith('생활비::')).map(o=>`<button type="button" class="chip chip-living" data-value="${esc(o.value)}">${esc(o.label.replace('생활비',''))}</button>`).join('')}</div></div>
+          <div class="quick-cat-group food-group"><span class="quick-cat-label">식비</span><div class="quick-cats">${options.filter(o=>o.value.startsWith('식비::')).map(o=>`<button type="button" class="chip chip-food" data-value="${esc(o.value)}">${esc(o.label.replace('식비',''))}</button>`).join('')}</div></div>
+          <div class="quick-cat-group event-group"><span class="quick-cat-label">이벤트</span><div class="quick-cats">${options.filter(o=>o.value.startsWith('이벤트::')).map(o=>`<button type="button" class="chip chip-event" data-value="${esc(o.value)}">${esc(o.label.replace('이벤트',''))}</button>`).join('')}</div></div>
+        </div>
         <div class="divider"></div>
-        <form id="expenseForm" novalidate>
+        <form id="expenseForm" class="compact-expense-form" novalidate>
           <div class="form-grid">
             <div class="field"><label>대분류</label><select name="categoryChoice" id="expenseCat">${options.map(o=>`<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('')}</select></div>
             <div class="field"><label>사용금액</label><input name="amount" type="number" min="1" inputmode="numeric" placeholder="예: 35000"></div>
