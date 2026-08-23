@@ -130,7 +130,7 @@ const pages = [
   ['details','≡','변동지출 내역','등록된 지출을 날짜·분류·결제수단별로 확인하세요.'],
   ['summary','▦','연간 요약','한 해의 수입과 지출 흐름을 간단히 확인하세요.'],
   ['income','↗','월별 수입','월별 수입 항목을 등록하고 수정하세요.'],
-  ['fixed','⌂','기본지출 관리','월별 고정·기본지출 항목과 금액을 관리하세요.'],
+  ['fixed','⌂','기본지출(현금고정지출)','월별 현금 고정지출 항목과 금액을 관리하세요.'],
   ['cards','▤','카드 사용 기록','카드별 청구·사용 금액을 별도로 기록하세요.'],
   ['settings','⚙','항목 설정','이벤트 세부분류 등 가계부 항목을 관리하세요.']
 ];
@@ -194,7 +194,7 @@ function expenseCategoryOptions(){
   const base=(state.settings.variableCategories||[]).filter(c=>c!=='이벤트');
   const events=(state.settings.eventCategories||[]).map(e=>({value:`이벤트::${e}`,label:`이벤트(${e})`}));
   return [
-    ...base.map(c=>({value:c,label:c})),
+    ...base.map(c=>({value:c,label:c==='고정'?'카드고정지출':c})),
     ...events
   ];
 }
@@ -203,6 +203,10 @@ function parseExpenseCategory(value){
   if(v.startsWith('이벤트::')) return {category:'이벤트',eventCategory:v.slice('이벤트::'.length)};
   return {category:v,eventCategory:''};
 }
+function categoryDisplayName(category){
+  return category==='고정' ? '카드고정지출' : category;
+}
+
 function balanceClass(s){
   if(s.remaining<0) return 'balance-danger';
   if(s.limit>0 && s.remaining/s.limit>=0.30) return 'balance-safe';
@@ -224,7 +228,7 @@ function renderAdd(){
       <div class="metric budget-summary-item">
         <div class="metric-label">예산 반영 지출</div>
         <div class="metric-value">${won(s.budgetVariable)}</div>
-        <div class="metric-foot">고정·이벤트 제외</div>
+        <div class="metric-foot">카드고정지출·이벤트 제외</div>
       </div>
       <div class="metric budget-summary-item ${balanceClass(s)}">
         <div class="metric-label">남은 금액</div>
@@ -298,7 +302,7 @@ function renderAdd(){
     renderAdd();
   };
   document.getElementById('editLimitBtn').onclick=()=>{
-    const v=prompt(`${selectedMonth} 생활예산(고정·이벤트 제외) 사용가능 금액을 입력하세요.`, s.limit||'');
+    const v=prompt(`${selectedMonth} 생활예산(카드고정지출·이벤트 제외) 사용가능 금액을 입력하세요.`, s.limit||'');
     if(v!==null && v!=='' && Number(v)>=0){state.monthlyLimits[selectedMonth]=Number(v);formDirty=false;saveState();renderAdd();}
   };
   document.getElementById('goDetails').onclick=()=>{formDirty=false;activePage='details';render()};
@@ -307,17 +311,109 @@ function renderAdd(){
 function recentExpensesHtml(){
   const arr=state.variableExpenses.filter(x=>monthOf(x.date)===selectedMonth).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
   if(!arr.length)return `<div class="empty">아직 등록된 지출이 없습니다.</div>`;
-  return `<div class="summary-list">${arr.map(x=>`<div class="summary-line"><span>${esc(x.memo||(x.category==='이벤트'&&x.eventCategory?`이벤트(${x.eventCategory})`:x.category))}</span><div class="muted">${esc(x.date)} · ${esc(x.method)}</div><strong>${won(x.amount)}</strong></div>`).join('')}</div>`;
+  return `<div class="summary-list">${arr.map(x=>`<div class="summary-line"><span>${esc(x.memo||(x.category==='이벤트'&&x.eventCategory?`이벤트(${x.eventCategory})`:categoryDisplayName(x.category)))}</span><div class="muted">${esc(x.date)} · ${esc(x.method)}</div><strong>${won(x.amount)}</strong></div>`).join('')}</div>`;
 }
 
+function yearComparisonMonths(year){
+  const months=[...new Set(state.variableExpenses
+    .filter(x=>String(x.date||'').startsWith(year+'-'))
+    .map(x=>monthOf(x.date))
+    .filter(Boolean))].sort();
+  return months;
+}
+function yearMonthlyAverage(year, category, eventCategory=''){
+  const months=yearComparisonMonths(year);
+  if(!months.length) return 0;
+  const total=state.variableExpenses
+    .filter(x=>String(x.date||'').startsWith(year+'-'))
+    .filter(x=>x.category===category)
+    .filter(x=>category!=='이벤트' || x.eventCategory===eventCategory)
+    .reduce((a,b)=>a+Number(b.amount||0),0);
+  return total/months.length;
+}
+function averageCompareMarkup(current, average){
+  current=Number(current)||0; average=Number(average)||0;
+  if(average<=0) return `<span class="avg-neutral">연평균 비교 데이터 없음</span>`;
+  const pct=((current-average)/average)*100;
+  if(Math.abs(pct)<1) return `<span class="avg-neutral">→ 연평균과 비슷</span>`;
+  if(pct>0) return `<span class="avg-high">↑ 연평균보다 ${Math.abs(pct).toFixed(0)}% 높음</span>`;
+  return `<span class="avg-low">↓ 연평균보다 ${Math.abs(pct).toFixed(0)}% 낮음</span>`;
+}
 function renderDetails(){
   let rows=state.variableExpenses.filter(x=>monthOf(x.date)===selectedMonth).sort((a,b)=>b.date.localeCompare(a.date));
   const total=rows.reduce((a,b)=>a+Number(b.amount),0);
+  const year=selectedMonth.slice(0,4);
+  const categories=['고정','생활비','식비','아이관련생활비','아이관련식비','이벤트'];
+  const cards=categories.map(cat=>{
+    const amount=rows.filter(x=>x.category===cat).reduce((a,b)=>a+Number(b.amount||0),0);
+    const avg=yearMonthlyAverage(year,cat);
+    if(cat==='이벤트'){
+      const events=(state.settings.eventCategories||[]).map(ev=>{
+        const evAmount=rows.filter(x=>x.category==='이벤트'&&x.eventCategory===ev).reduce((a,b)=>a+Number(b.amount||0),0);
+        const evAvg=yearMonthlyAverage(year,'이벤트',ev);
+        return `<div class="event-summary-line"><span>${esc(ev)}</span><strong>${won(evAmount)}</strong><span class="event-avg">${averageCompareMarkup(evAmount,evAvg)}</span></div>`;
+      }).join('');
+      return `<div class="category-summary-card event-summary-card">
+        <div class="category-summary-head"><span>이벤트</span><strong>${won(amount)}</strong></div>
+        <div class="category-average">${averageCompareMarkup(amount,avg)}</div>
+        <div class="event-summary-list">${events}</div>
+      </div>`;
+    }
+    return `<div class="category-summary-card">
+      <div class="category-summary-head"><span>${esc(categoryDisplayName(cat))}</span><strong>${won(amount)}</strong></div>
+      <div class="category-average">${averageCompareMarkup(amount,avg)}</div>
+    </div>`;
+  }).join('');
+
   app.innerHTML=`
     <div class="grid cols-3"><div class="card metric"><div class="metric-label">총 변동지출</div><div class="metric-value">${won(total)}</div></div><div class="card metric"><div class="metric-label">등록 건수</div><div class="metric-value">${rows.length}건</div></div><div class="card metric"><div class="metric-label">일 평균 지출</div><div class="metric-value">${won(rows.length?total/new Date(+selectedMonth.slice(0,4),+selectedMonth.slice(5,7),0).getDate():0)}</div></div></div>
-    <div class="card section-gap"><div class="card-head"><div><h2>${selectedMonth} 세부 내역</h2><p>삭제한 내역은 복구되지 않습니다.</p></div></div>
-    <div class="table-wrap">${rows.length?`<table class="table"><thead><tr><th>날짜</th><th>대분류</th><th>이벤트</th><th>사용내역</th><th>지출방식</th><th class="amount">금액</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.date)}</td><td><span class="pill ${x.category==='이벤트'?'event':''}">${esc(x.category)}</span></td><td>${esc(x.eventCategory||'-')}</td><td>${esc(x.memo||'-')}</td><td>${esc(x.method)}</td><td class="amount"><strong>${won(x.amount)}</strong></td><td><button class="btn small danger delete-exp" data-id="${x.id}">삭제</button></td></tr>`).join('')}</tbody></table>`:`<div class="empty">${selectedMonth}에 등록된 내역이 없습니다.</div>`}</div></div>`;
-  document.querySelectorAll('.delete-exp').forEach(b=>b.onclick=()=>{if(confirm('이 지출 내역을 삭제할까요?')){state.variableExpenses=state.variableExpenses.filter(x=>x.id!==b.dataset.id);saveState();renderDetails()}})
+    <div class="card section-gap"><div class="card-head"><div><h2>대분류별 지출</h2><p>${year}년 실제 기록이 있는 월 기준 월평균과 비교합니다.</p></div></div><div class="category-summary-grid">${cards}</div></div>
+    <div class="card section-gap"><div class="card-head"><div><h2>${selectedMonth} 세부 내역</h2><p>등록한 내용을 수정하거나 삭제할 수 있습니다.</p></div></div>
+    <div class="table-wrap">${rows.length?`<table class="table"><thead><tr><th>날짜</th><th>대분류</th><th>이벤트</th><th>사용내역</th><th>지출방식</th><th class="amount">금액</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.date)}</td><td><span class="pill ${x.category==='이벤트'?'event':''}">${esc(categoryDisplayName(x.category))}</span></td><td>${esc(x.eventCategory||'-')}</td><td>${esc(x.memo||'-')}</td><td>${esc(x.method)}</td><td class="amount"><strong>${won(x.amount)}</strong></td><td><div class="row-actions"><button class="btn small edit-exp" data-id="${x.id}">수정</button><button class="btn small danger delete-exp" data-id="${x.id}">삭제</button></div></td></tr>`).join('')}</tbody></table>`:`<div class="empty">${selectedMonth}에 등록된 내역이 없습니다.</div>`}</div></div>`;
+  document.querySelectorAll('.delete-exp').forEach(b=>b.onclick=()=>{if(confirm('이 지출 내역을 삭제할까요?')){state.variableExpenses=state.variableExpenses.filter(x=>x.id!==b.dataset.id);saveState();renderDetails()}});
+  document.querySelectorAll('.edit-exp').forEach(b=>b.onclick=()=>renderExpenseEdit(b.dataset.id));
+}
+function renderExpenseEdit(expenseId){
+  const x=state.variableExpenses.find(v=>v.id===expenseId);
+  if(!x){ renderDetails(); return; }
+  const options=expenseCategoryOptions();
+  const currentChoice=x.category==='이벤트'?`이벤트::${x.eventCategory||''}`:x.category;
+  app.innerHTML=`<div class="card expense-edit-card">
+    <div class="card-head"><div><h2>변동지출 수정</h2><p>수정 내용은 예산과 통계에 즉시 다시 반영됩니다.</p></div></div>
+    <form id="editExpenseForm" novalidate>
+      <div class="form-grid">
+        <div class="field"><label>대분류</label><select name="categoryChoice">${options.map(o=>`<option value="${esc(o.value)}" ${o.value===currentChoice?'selected':''}>${esc(o.label)}</option>`).join('')}</select></div>
+        <div class="field"><label>사용금액</label><input name="amount" type="number" min="1" inputmode="numeric" value="${Number(x.amount)||0}"></div>
+        <div class="field"><label>사용날짜</label><input name="date" type="date" value="${esc(x.date)}"></div>
+        <div class="field"><label>지출방식</label><select name="method">${state.settings.methods.map(m=>`<option ${m===x.method?'selected':''}>${esc(m)}</option>`).join('')}</select></div>
+        <div class="field full"><label>사용내역</label><input name="memo" value="${esc(x.memo||'')}"></div>
+      </div>
+      <div id="editExpenseMsg" class="helper-text"></div>
+      <div class="button-row"><button type="button" class="btn" id="cancelExpenseEdit">취소</button><button type="submit" class="btn primary">수정 저장</button></div>
+    </form>
+  </div>`;
+  document.getElementById('cancelExpenseEdit').onclick=()=>renderDetails();
+  document.getElementById('editExpenseForm').onsubmit=e=>{
+    e.preventDefault();
+    const f=new FormData(e.target);
+    const amount=Number(f.get('amount'));
+    const date=String(f.get('date')||'').trim();
+    const method=String(f.get('method')||'').trim();
+    const parsed=parseExpenseCategory(String(f.get('categoryChoice')||''));
+    const msg=document.getElementById('editExpenseMsg');
+    if(!parsed.category || !Number.isFinite(amount) || amount<=0 || !date || !method){
+      msg.textContent='대분류, 금액, 날짜, 지출방식을 확인해 주세요.';
+      msg.className='helper-text error';
+      return;
+    }
+    Object.assign(x,{category:parsed.category,eventCategory:parsed.eventCategory,amount,date,method,memo:String(f.get('memo')||'').trim()});
+    formDirty=false;
+    saveState();
+    toast('지출 내역을 수정했습니다.');
+    selectedMonth=monthOf(date)||selectedMonth;
+    globalMonth.value=selectedMonth;
+    renderDetails();
+  };
 }
 
 function renderIncome(){
@@ -327,7 +423,7 @@ function renderIncome(){
 }
 function renderFixed(){
   const list=state.fixedExpenses[selectedMonth]||[]; const total=list.reduce((a,b)=>a+Number(b.amount),0);
-  app.innerHTML=`<div class="grid cols-2"><div class="card"><div class="card-head"><div><h2>${selectedMonth} 기본지출 추가</h2><p>관리비, 보험, 통신비, 대출, 구독 등을 등록하세요.</p></div></div><form id="fixedForm"><div class="form-grid"><div class="field"><label>지출 항목</label><input name="name" placeholder="예: 관리비" required></div><div class="field"><label>금액</label><input name="amount" type="number" min="0" inputmode="numeric" required></div></div><div class="button-row"><button class="btn primary">추가</button></div></form></div><div class="card metric negative"><div class="metric-label">이번 달 기본지출</div><div class="metric-value">${won(total)}</div><div class="metric-foot">등록된 ${list.length}개 항목 합계</div></div></div><div class="card section-gap"><div class="card-head"><h2>기본지출 항목</h2></div>${editorRows(list,'fixed')}</div>`;
+  app.innerHTML=`<div class="grid cols-2"><div class="card"><div class="card-head"><div><h2>${selectedMonth} 기본지출(현금고정지출) 추가</h2><p>관리비, 보험, 통신비, 대출, 구독 등을 등록하세요.</p></div></div><form id="fixedForm"><div class="form-grid"><div class="field"><label>지출 항목</label><input name="name" placeholder="예: 관리비" required></div><div class="field"><label>금액</label><input name="amount" type="number" min="0" inputmode="numeric" required></div></div><div class="button-row"><button class="btn primary">추가</button></div></form></div><div class="card metric negative"><div class="metric-label">이번 달 기본지출(현금고정지출)</div><div class="metric-value">${won(total)}</div><div class="metric-foot">등록된 ${list.length}개 항목 합계</div></div></div><div class="card section-gap"><div class="card-head"><h2>기본지출(현금고정지출) 항목</h2></div>${editorRows(list,'fixed')}</div>`;
   document.getElementById('fixedForm').onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);state.fixedExpenses[selectedMonth]=[...(state.fixedExpenses[selectedMonth]||[]),{id:id(),name:f.get('name'),amount:Number(f.get('amount'))}];saveState();renderFixed()}; bindEditor('fixed');
 }
 function editorRows(list,type){
