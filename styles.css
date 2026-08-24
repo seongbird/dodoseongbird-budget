@@ -262,3 +262,61 @@ body[data-theme="lovable"] .month-picker-wrap{background:rgba(255,255,255,.78)}
  .copy-fixed-btn{font-size:8.5px!important;padding:6px 7px!important}
  .quick-cat-group{grid-template-columns:52px minmax(0,1fr);padding:8px}
 }
+
+
+/* v6 main-screen stability + mobile form fixes */
+.compact-expense-form .field input,
+.compact-expense-form .field select{
+  box-sizing:border-box;
+  width:100%;
+  height:42px;
+  min-height:42px;
+  padding:0 12px;
+  line-height:1.2;
+  font-family:inherit;
+  border-radius:11px;
+}
+
+/* Recent list: date and payment method use fixed, aligned columns */
+.recent-list{display:grid;width:100%}
+.recent-row{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 92px 76px minmax(84px,auto);
+  gap:10px;
+  align-items:center;
+  min-height:38px;
+  padding:9px 2px;
+  border-bottom:1px solid var(--line);
+}
+.recent-row:last-child{border-bottom:0}
+.recent-memo,.recent-date,.recent-method,.recent-amount{
+  font-family:inherit;
+  font-size:11px;
+  line-height:1.25;
+}
+.recent-memo{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recent-date,.recent-method{color:var(--muted);text-align:left;font-variant-numeric:tabular-nums}
+.recent-amount{text-align:right;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* Mobile Safari auto-zooms form controls below 16px. Keep controls at 16px while retaining compact geometry. */
+@media(max-width:760px){
+  .compact-expense-form .field input,
+  .compact-expense-form .field select{
+    font-size:16px!important;
+    height:42px!important;
+    min-height:42px!important;
+    line-height:1.2!important;
+  }
+  .recent-row{
+    grid-template-columns:minmax(0,1fr) 84px 70px minmax(78px,auto);
+    gap:7px;
+  }
+  .recent-memo,.recent-date,.recent-method,.recent-amount{font-size:10.5px}
+}
+@media(max-width:430px){
+  .recent-row{
+    grid-template-columns:minmax(0,1fr) 78px 62px minmax(72px,auto);
+    gap:5px;
+  }
+  .recent-memo,.recent-date,.recent-method,.recent-amount{font-size:10px}
+}

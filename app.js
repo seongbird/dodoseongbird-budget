@@ -27,6 +27,20 @@ const PIN_SESSION_KEY = 'coupleBudget_pin_ok_v1';
 let syncing = false;
 let pendingSave = false;
 let formDirty = false;
+let expenseDraft = null;
+function snapshotExpenseDraft(form){
+  if(!form) return;
+  const f=new FormData(form);
+  expenseDraft={
+    categoryChoice:String(f.get('categoryChoice')||''),
+    amount:String(f.get('amount')||''),
+    date:String(f.get('date')||''),
+    method:String(f.get('method')||''),
+    memo:String(f.get('memo')||'')
+  };
+  formDirty=true;
+}
+function clearExpenseDraft(){ expenseDraft=null; }
 const THEME_KEY = 'coupleBudget_theme_v1';
 let uiTheme = localStorage.getItem(THEME_KEY) || 'current';
 function applyTheme(theme){ uiTheme = theme==='lovable'?'lovable':'current'; localStorage.setItem(THEME_KEY,uiTheme); document.body.dataset.theme=uiTheme; }
@@ -209,11 +223,18 @@ function expenseDisplayName(x){
 async function protectedSetMonthlyLimit(month,amount,loginPin){
   const loginHash=await sha256(loginPin);
   if(!PIN_HASH || loginHash!==PIN_HASH) throw new Error('가계부 접속 PIN이 올바르지 않습니다.');
+  setSyncStatus('가용금액 저장 중…');
+  const res=await jsonpRequest({
+    action:'setProtectedLimitWithLoginPin',
+    month:String(month),
+    amount:String(Number(amount)||0),
+    loginPinHash:loginHash
+  });
+  if(!res || !res.ok) throw new Error((res&&res.error)||'가용금액 저장에 실패했습니다.');
   state.monthlyLimits[month]=Number(amount)||0;
   saveLocalOnly();
-  setSyncStatus('가용금액 저장 중…');
-  await fetch(API_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'setProtectedLimitWithLoginPin',payload:{month,amount:Number(amount)||0,loginPinHash:loginHash}})});
   setSyncStatus('가용금액 Google Sheets 저장됨');
+  return true;
 }
 
 
@@ -260,6 +281,12 @@ function renderAdd(){
   const pct=s.limit>0?Math.min(100,(s.budgetVariable/s.limit)*100):0;
   const options=expenseCategoryOptions();
   const defaultValue=options.length?options[0].value:'';
+  const draft=expenseDraft||{};
+  const draftChoice=draft.categoryChoice||defaultValue;
+  const draftAmount=draft.amount||'';
+  const draftDate=draft.date||(selectedMonth===currentMonth?todayStr:selectedMonth+'-01');
+  const draftMethod=draft.method||((state.settings.methods||[])[0]||'');
+  const draftMemo=draft.memo||'';
   app.innerHTML=`
     <div class="budget-summary-grid">
       <button class="metric budget-summary-item budget-limit-card" id="editLimitCard" type="button" aria-label="이번 달 사용가능 금액 수정">
@@ -286,19 +313,19 @@ function renderAdd(){
       <div class="card">
         <div class="card-head"><div><h2>변동지출 등록</h2><p>생활비·식비·이벤트는 세부 항목을 바로 선택할 수 있습니다.</p></div><button class="btn small copy-fixed-btn" id="copyCardFixedBtn" type="button">전월 카드고정지출 복사</button></div>
         <div class="quick-cat-groups" id="quickCats">
-          <div class="quick-cat-group fixed-group"><span class="quick-cat-label">고정</span><div class="quick-cats">${options.filter(o=>o.value==='고정').map((o,i)=>`<button type="button" class="chip chip-fixed ${i===0?'active':''}" data-value="${esc(o.value)}">${esc(o.label)}</button>`).join('')}</div></div>
-          <div class="quick-cat-group living-group"><span class="quick-cat-label">생활비</span><div class="quick-cats">${options.filter(o=>o.value.startsWith('생활비::')).map(o=>`<button type="button" class="chip chip-living" data-value="${esc(o.value)}">${esc(o.label.replace('생활비',''))}</button>`).join('')}</div></div>
-          <div class="quick-cat-group food-group"><span class="quick-cat-label">식비</span><div class="quick-cats">${options.filter(o=>o.value.startsWith('식비::')).map(o=>`<button type="button" class="chip chip-food" data-value="${esc(o.value)}">${esc(o.label.replace('식비',''))}</button>`).join('')}</div></div>
-          <div class="quick-cat-group event-group"><span class="quick-cat-label">이벤트</span><div class="quick-cats">${options.filter(o=>o.value.startsWith('이벤트::')).map(o=>`<button type="button" class="chip chip-event" data-value="${esc(o.value)}">${esc(o.label.replace('이벤트',''))}</button>`).join('')}</div></div>
+          <div class="quick-cat-group fixed-group"><span class="quick-cat-label">고정</span><div class="quick-cats">${options.filter(o=>o.value==='고정').map(o=>`<button type="button" class="chip chip-fixed ${o.value===draftChoice?'active':''}" data-value="${esc(o.value)}">${esc(o.label)}</button>`).join('')}</div></div>
+          <div class="quick-cat-group living-group"><span class="quick-cat-label">생활비</span><div class="quick-cats">${options.filter(o=>o.value.startsWith('생활비::')).map(o=>`<button type="button" class="chip chip-living ${o.value===draftChoice?'active':''}" data-value="${esc(o.value)}">${esc(o.value.split('::')[1])}</button>`).join('')}</div></div>
+          <div class="quick-cat-group food-group"><span class="quick-cat-label">식비</span><div class="quick-cats">${options.filter(o=>o.value.startsWith('식비::')).map(o=>`<button type="button" class="chip chip-food ${o.value===draftChoice?'active':''}" data-value="${esc(o.value)}">${esc(o.value.split('::')[1])}</button>`).join('')}</div></div>
+          <div class="quick-cat-group event-group"><span class="quick-cat-label">이벤트</span><div class="quick-cats">${options.filter(o=>o.value.startsWith('이벤트::')).map(o=>`<button type="button" class="chip chip-event ${o.value===draftChoice?'active':''}" data-value="${esc(o.value)}">${esc(o.value.split('::')[1])}</button>`).join('')}</div></div>
         </div>
         <div class="divider"></div>
         <form id="expenseForm" class="compact-expense-form" novalidate>
           <div class="form-grid">
-            <div class="field"><label>대분류</label><select name="categoryChoice" id="expenseCat">${options.map(o=>`<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('')}</select></div>
-            <div class="field"><label>사용금액</label><input name="amount" type="number" min="1" inputmode="numeric" placeholder="예: 35000"></div>
-            <div class="field"><label>사용날짜</label><input name="date" type="date" value="${selectedMonth===currentMonth?todayStr:selectedMonth+'-01'}"></div>
-            <div class="field"><label>지출방식</label><select name="method">${state.settings.methods.map(c=>`<option>${esc(c)}</option>`).join('')}</select></div>
-            <div class="field full"><label>사용내역</label><input name="memo" placeholder="예: 마트 장보기, 아기 기저귀, 외식"></div>
+            <div class="field"><label>대분류</label><select name="categoryChoice" id="expenseCat">${options.map(o=>`<option value="${esc(o.value)}" ${o.value===draftChoice?'selected':''}>${esc(o.label)}</option>`).join('')}</select></div>
+            <div class="field"><label>사용금액</label><input name="amount" type="number" min="1" inputmode="numeric" placeholder="예: 35000" value="${esc(draftAmount)}"></div>
+            <div class="field"><label>사용날짜</label><input name="date" type="date" value="${esc(draftDate)}"></div>
+            <div class="field"><label>지출방식</label><select name="method">${state.settings.methods.map(c=>`<option ${c===draftMethod?'selected':''}>${esc(c)}</option>`).join('')}</select></div>
+            <div class="field full"><label>사용내역</label><input name="memo" placeholder="예: 마트 장보기, 아기 기저귀, 외식" value="${esc(draftMemo)}"></div>
           </div>
           <div id="expenseFormMsg" class="helper-text"></div>
           <div class="button-row"><button type="submit" class="btn primary">지출 등록</button></div>
@@ -312,18 +339,22 @@ function renderAdd(){
   const form=document.getElementById('expenseForm');
   const cat=document.getElementById('expenseCat');
   const msg=document.getElementById('expenseFormMsg');
-  const markDirty=()=>{formDirty=true;};
+  const rememberDraft=()=>snapshotExpenseDraft(form);
   form.querySelectorAll('input,select').forEach(el=>{
-    el.addEventListener('input',markDirty);
-    el.addEventListener('change',markDirty);
+    el.addEventListener('focus',()=>{ formDirty=true; });
+    el.addEventListener('input',rememberDraft);
+    el.addEventListener('change',rememberDraft);
   });
   cat.onchange=()=>{
-    markDirty();
+    rememberDraft();
     document.querySelectorAll('#quickCats .chip').forEach(x=>x.classList.toggle('active',x.dataset.value===cat.value));
   };
   document.querySelectorAll('#quickCats .chip').forEach(b=>b.onclick=()=>{
+    snapshotExpenseDraft(form);
     cat.value=b.dataset.value;
-    cat.dispatchEvent(new Event('change'));
+    expenseDraft={...(expenseDraft||{}),categoryChoice:cat.value};
+    formDirty=true;
+    document.querySelectorAll('#quickCats .chip').forEach(x=>x.classList.toggle('active',x===b));
   });
 
   form.onsubmit=e=>{
@@ -344,6 +375,7 @@ function renderAdd(){
       amount,date,memo:String(f.get('memo')||'').trim(),method
     });
     formDirty=false;
+    clearExpenseDraft();
     saveState();
     toast('변동지출을 등록했습니다.');
     renderAdd();
@@ -368,7 +400,7 @@ function renderAdd(){
     src.forEach(x=>{ if(existing.some(e=>e.memo===x.memo&&Number(e.amount)===Number(x.amount)&&e.method===x.method)) return; state.variableExpenses.push({...x,id:id(),date:dateInMonthLike(x.date,selectedMonth),createdAt:'',updatedAt:''}); added++; });
     if(added){saveState();renderAdd();toast(`${added}건을 복사했습니다.`);} else alert('이미 같은 카드고정지출이 등록되어 있습니다.');
   };
-  document.getElementById('goDetails').onclick=()=>{formDirty=false;activePage='details';render()};
+  document.getElementById('goDetails').onclick=()=>{formDirty=false;clearExpenseDraft();activePage='details';render()};
 }
 
 function recentExpensesHtml(){
@@ -517,7 +549,7 @@ function renderSettings(){
     <div class="card"><div class="card-head"><div><h2>화면 스타일</h2><p>두 기기에서 각각 원하는 스타일을 선택할 수 있습니다.</p></div></div><div class="theme-choice"><button class="theme-option ${uiTheme==='current'?'active':''}" data-theme="current"><strong>Current</strong><span>현재의 차분한 금융앱 스타일</span></button><button class="theme-option ${uiTheme==='lovable'?'active':''}" data-theme="lovable"><strong>Lovable</strong><span>그라디언트와 친근한 SaaS 스타일</span></button></div></div>
   </div>
   <div class="grid cols-2 section-gap">
-    <div class="card"><div class="card-head"><div><h2>가용금액 관리 PIN</h2><p>가용금액은 별도 관리 PIN을 아는 사람만 수정할 수 있습니다.</p></div></div><div class="notice">처음 가용금액을 수정할 때 관리 PIN을 별도로 설정합니다. 접속 PIN과 다른 번호를 권장합니다.</div></div>
+    <div class="card"><div class="card-head"><div><h2>가용금액 수정 보호</h2><p>가용금액 수정 시 현재 가계부 접속 PIN을 다시 확인합니다.</p></div></div><div class="notice">별도 관리 PIN은 사용하지 않습니다. 가계부 접속 PIN이 일치해야만 가용금액을 변경할 수 있습니다.</div></div>
     <div class="card"><div class="card-head"><div><h2>접속 PIN 변경</h2><p>변경하면 모든 기기에서 새 PIN을 사용합니다.</p></div></div><form id="pinChangeForm" class="form-grid"><label><span>현재 PIN</span><input id="currentPin" type="password" inputmode="numeric" maxlength="12" required></label><label><span>새 PIN</span><input id="newPin" type="password" inputmode="numeric" maxlength="12" placeholder="숫자 4~12자리" required></label><label><span>새 PIN 확인</span><input id="newPin2" type="password" inputmode="numeric" maxlength="12" required></label><div class="form-action"><button class="btn primary" type="submit">PIN 변경</button></div></form><div id="pinChangeMsg" class="helper-text"></div></div>
   </div>`;
   document.querySelectorAll('#eventList input').forEach(inp=>inp.onchange=()=>{state.settings.eventCategories[Number(inp.dataset.i)]=inp.value.trim();saveState()});
