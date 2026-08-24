@@ -227,3 +227,38 @@ body[data-theme="lovable"] .progress-fill{background:linear-gradient(90deg,#8b5c
 body[data-theme="lovable"] .nav-item.active{background:linear-gradient(90deg,rgba(139,92,246,.12),rgba(236,72,153,.08));color:#7c3aed}
 body[data-theme="lovable"] .month-picker-wrap{background:rgba(255,255,255,.78)}
 \n\n/* v4 usability refinements */\n.category-summary-grid{grid-template-columns:repeat(4,minmax(0,1fr))}\n.event-summary-card{grid-column:auto}\n.budget-summary-item{position:relative;align-items:flex-start!important;text-align:left!important;justify-content:flex-start!important}\n.budget-summary-item .metric-label,.budget-summary-item .metric-value,.budget-summary-item .metric-foot{text-align:left!important;width:100%}\n.budget-limit-link{display:none}\n.budget-limit-button{position:absolute;right:12px;top:11px;width:30px;height:30px;border:1px solid var(--line);border-radius:50%;background:var(--panel-solid);color:var(--accent);display:grid;place-items:center;font-size:14px;font-weight:700;box-shadow:var(--shadow-soft);padding:0}\n.budget-limit-button:hover{transform:scale(1.04)}\n.quick-cat-groups{display:grid;gap:8px}\n.quick-cat-group{display:grid;grid-template-columns:70px minmax(0,1fr);align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--line);border-radius:14px}\n.quick-cat-label{font-size:10px;font-weight:750;color:var(--muted)}\n.quick-cat-group .quick-cats{gap:6px}\n.quick-cat-group .chip{padding:6px 9px;font-size:10px}\n.fixed-group{background:rgba(118,118,128,.045)}\n.living-group{background:rgba(0,113,227,.035)}\n.food-group{background:rgba(52,199,89,.045)}\n.event-group{background:rgba(255,149,0,.055)}\n.chip-fixed.active{background:#6e6e73;border-color:#6e6e73}\n.chip-living.active{background:#0071e3;border-color:#0071e3}\n.chip-food.active{background:#248a3d;border-color:#248a3d}\n.chip-event.active{background:#b25000;border-color:#b25000}\n.compact-expense-form{font-size:75%}\n.compact-expense-form .field{gap:5px}\n.compact-expense-form .field label{font-size:10px;margin-bottom:4px}\n.compact-expense-form .field input,.compact-expense-form .field select{padding:9px 10px;border-radius:10px;font-family:inherit;font-size:12px}\n.compact-expense-form .form-grid{gap:10px}\n.compact-expense-form .button-row{margin-top:14px}\n.compact-expense-form .btn{font-family:inherit;font-size:11px;padding:8px 13px}\nbody[data-theme="lovable"] .quick-cat-group{border-color:rgba(139,92,246,.10)}\n@media(max-width:1000px){.category-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}\n@media(max-width:760px){\n .category-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}\n .event-summary-card{grid-column:auto}\n .copy-fixed-btn{white-space:nowrap;font-size:9.5px;padding:7px 9px;flex:0 0 auto}\n .card-head:has(.copy-fixed-btn){align-items:center;flex-wrap:nowrap}\n .card-head:has(.copy-fixed-btn)>div{min-width:0}\n .card-head:has(.copy-fixed-btn) p{display:none}\n .quick-cat-group{grid-template-columns:56px minmax(0,1fr);padding:7px 8px;gap:7px}\n .quick-cat-label{font-size:9.5px}\n .quick-cat-group .chip{padding:6px 8px;font-size:9.5px}\n .budget-limit-button{width:26px;height:26px;right:8px;top:8px;font-size:12px}\n}\n@media(max-width:430px){.category-summary-grid{grid-template-columns:1fr 1fr}.copy-fixed-btn{font-size:9px;padding:6px 8px}.quick-cat-group{grid-template-columns:50px minmax(0,1fr)}}\n
+/* v5 restrained visual correction */
+.budget-limit-button{display:none!important}
+.budget-limit-card{border:0;background:transparent;color:inherit;width:auto;appearance:none;-webkit-appearance:none;cursor:pointer;font:inherit;box-shadow:none;text-align:left}
+.budget-limit-card:hover{background:rgba(118,118,128,.035)}
+.budget-limit-card:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.budget-limit-card .metric-foot{opacity:.72}
+.quick-cat-groups{display:grid;gap:0;border:1px solid var(--line);border-radius:15px;overflow:hidden;background:rgba(255,255,255,.48)}
+.quick-cat-group{display:grid;grid-template-columns:76px minmax(0,1fr);align-items:center;gap:10px;padding:10px 12px;border:0;border-radius:0!important;background:transparent!important}
+.quick-cat-group + .quick-cat-group{border-top:1px solid var(--line)}
+.quick-cat-label{font-size:11px;font-weight:700;color:var(--muted)}
+.quick-cat-group .quick-cats{display:flex;flex-wrap:wrap;gap:7px}
+.quick-cat-group .chip{padding:7px 11px;font-size:11px;line-height:1;border-radius:999px;border:1px solid rgba(0,0,0,.08);box-shadow:none;color:#3a3a3c}
+.fixed-group .chip{background:#f1f1f3}.living-group .chip{background:#e9e9ec}.food-group .chip{background:#dfdfe3}.event-group .chip{background:#d4d4d9}
+.quick-cat-group .chip.active,.chip-fixed.active,.chip-living.active,.chip-food.active,.chip-event.active{background:#55565a!important;border-color:#55565a!important;color:#fff!important;box-shadow:none!important}
+.compact-expense-form{font-size:inherit}
+.compact-expense-form .form-grid{gap:12px}.compact-expense-form .field{gap:6px}
+.compact-expense-form .field label{font-size:11px;margin:0;color:var(--muted);font-weight:650}
+.compact-expense-form .field input,.compact-expense-form .field select{height:40px;min-height:40px;padding:0 12px;border-radius:11px;font-family:inherit;font-size:12px;line-height:40px}
+.compact-expense-form .field select{padding-right:34px}
+.compact-expense-form .button-row{margin-top:16px}.compact-expense-form .btn{font-family:inherit;font-size:12px;padding:9px 15px}
+.copy-fixed-btn{white-space:nowrap!important;word-break:keep-all!important;line-height:1!important;min-width:max-content}
+.budget-summary-item{align-items:flex-start!important;justify-content:flex-start!important;text-align:left!important}
+.budget-summary-item .metric-label,.budget-summary-item .metric-value,.budget-summary-item .metric-foot{width:100%;text-align:left!important}
+@media(max-width:760px){
+ .card-head:has(.copy-fixed-btn){display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px}
+ .copy-fixed-btn{font-size:9px!important;padding:7px 8px!important;max-width:none!important}
+ .quick-cat-group{grid-template-columns:58px minmax(0,1fr);gap:7px;padding:9px 10px}.quick-cat-label{font-size:10px}
+ .quick-cat-group .quick-cats{gap:5px}.quick-cat-group .chip{padding:6px 8px;font-size:10px}
+ .compact-expense-form .field input,.compact-expense-form .field select{height:38px;min-height:38px;font-size:12px;line-height:38px}
+}
+@media(max-width:430px){
+ .card-head:has(.copy-fixed-btn){grid-template-columns:minmax(0,1fr) auto!important}
+ .copy-fixed-btn{font-size:8.5px!important;padding:6px 7px!important}
+ .quick-cat-group{grid-template-columns:52px minmax(0,1fr);padding:8px}
+}

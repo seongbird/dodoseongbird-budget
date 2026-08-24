@@ -206,26 +206,14 @@ function expenseDisplayName(x){
   if(x.category==='이벤트'&&x.eventCategory) return `이벤트(${x.eventCategory})`;
   return x.category||'';
 }
-async function budgetAdminConfigured(){ try{ const r=await jsonpRequest({action:'getBudgetAdminConfig'}); return !!(r&&r.ok&&r.configured); }catch(e){return false;} }
-async function verifyBudgetAdminPin(pin){ const h=await sha256(pin); const r=await jsonpRequest({action:'verifyBudgetAdminPin',pinHash:h}); return !!(r&&r.ok&&r.valid); }
-async function protectedSetMonthlyLimit(month,amount,pin){
-  const h=await sha256(pin);
-  const valid=await verifyBudgetAdminPin(pin);
-  if(!valid) throw new Error('가용금액 관리 PIN이 올바르지 않습니다.');
-  state.monthlyLimits[month]=Number(amount)||0; saveLocalOnly(); setSyncStatus('가용금액 저장 중…');
-  await fetch(API_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'setProtectedLimit',payload:{month,amount:Number(amount)||0,adminPinHash:h}})});
-  setSyncStatus('가용금액 Google Sheets 저장됨');
-}
-async function ensureBudgetAdminPinSetup(){
-  if(await budgetAdminConfigured()) return true;
-  const loginPin=prompt('가용금액 관리 PIN을 처음 설정합니다. 현재 가계부 접속 PIN을 입력하세요.'); if(loginPin===null) return false;
+async function protectedSetMonthlyLimit(month,amount,loginPin){
   const loginHash=await sha256(loginPin);
-  if(!PIN_HASH || loginHash!==PIN_HASH){ alert('현재 가계부 접속 PIN이 올바르지 않습니다.'); return false; }
-  const newPin=prompt('가용금액 수정에 사용할 별도 관리 PIN을 숫자 4~12자리로 입력하세요.'); if(newPin===null) return false;
-  if(!/^\d{4,12}$/.test(newPin)){ alert('관리 PIN은 숫자 4~12자리여야 합니다.'); return false; }
-  const adminHash=await sha256(newPin);
-  await fetch(API_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'setBudgetAdminPin',payload:{loginPinHash:loginHash,adminPinHash:adminHash}})});
-  alert('가용금액 관리 PIN을 설정했습니다. 잠시 후부터 사용됩니다.'); return true;
+  if(!PIN_HASH || loginHash!==PIN_HASH) throw new Error('가계부 접속 PIN이 올바르지 않습니다.');
+  state.monthlyLimits[month]=Number(amount)||0;
+  saveLocalOnly();
+  setSyncStatus('가용금액 저장 중…');
+  await fetch(API_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'setProtectedLimitWithLoginPin',payload:{month,amount:Number(amount)||0,loginPinHash:loginHash}})});
+  setSyncStatus('가용금액 Google Sheets 저장됨');
 }
 
 
@@ -274,11 +262,11 @@ function renderAdd(){
   const defaultValue=options.length?options[0].value:'';
   app.innerHTML=`
     <div class="budget-summary-grid">
-      <div class="metric budget-summary-item">
+      <button class="metric budget-summary-item budget-limit-card" id="editLimitCard" type="button" aria-label="이번 달 사용가능 금액 수정">
         <div class="metric-label">이번 달 사용가능 금액</div>
         <div class="metric-value">${won(s.limit)}</div>
-        <button class="budget-limit-button" id="editLimitBtn" type="button" aria-label="가용금액 설정" title="가용금액 설정">✎</button>
-      </div>
+        <div class="metric-foot">금액을 눌러 수정</div>
+      </button>
       <div class="metric budget-summary-item">
         <div class="metric-label">생활예산 사용액</div>
         <div class="metric-value">${won(s.budgetVariable)}</div>
@@ -360,12 +348,16 @@ function renderAdd(){
     toast('변동지출을 등록했습니다.');
     renderAdd();
   };
-  document.getElementById('editLimitBtn').onclick=async()=>{
-    if(!(await ensureBudgetAdminPinSetup())) return;
-    const pin=prompt('가용금액 관리 PIN을 입력하세요.'); if(pin===null) return;
-    const valid=await verifyBudgetAdminPin(pin); if(!valid){alert('관리 PIN이 올바르지 않습니다.');return;}
-    const v=prompt(`${selectedMonth} 생활예산(카드고정지출·이벤트 제외) 사용가능 금액을 입력하세요.`, s.limit||'');
-    if(v!==null && v!=='' && Number(v)>=0){ try{await protectedSetMonthlyLimit(selectedMonth,Number(v),pin); formDirty=false; renderAdd(); toast('가용금액을 저장했습니다.');}catch(err){alert(err.message||'저장에 실패했습니다.');} }
+  document.getElementById('editLimitCard').onclick=async()=>{
+    const pin=prompt('가용금액을 수정하려면 현재 가계부 접속 PIN을 입력하세요.');
+    if(pin===null) return;
+    const loginHash=await sha256(pin);
+    if(!PIN_HASH || loginHash!==PIN_HASH){ alert('가계부 접속 PIN이 올바르지 않습니다.'); return; }
+    const v=prompt(`${selectedMonth} 생활예산 사용가능 금액을 입력하세요.`, s.limit||'');
+    if(v!==null && v!=='' && Number(v)>=0){
+      try{ await protectedSetMonthlyLimit(selectedMonth,Number(v),pin); formDirty=false; renderAdd(); toast('가용금액을 저장했습니다.'); }
+      catch(err){ alert(err.message||'저장에 실패했습니다.'); }
+    }
   };
   const copyBtn=document.getElementById('copyCardFixedBtn');
   if(copyBtn) copyBtn.onclick=()=>{
