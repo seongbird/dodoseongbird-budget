@@ -58,12 +58,12 @@ function unlockApp(){
   sessionStorage.setItem(PIN_SESSION_KEY,'1');
   const gate=document.getElementById('pinGate');
   if(gate){ gate.classList.remove('show'); gate.setAttribute('aria-hidden','true'); }
-  document.body.classList.remove('locked');
+  document.body.classList.remove('locked','pin-pending');
 }
 function lockApp(){
   const gate=document.getElementById('pinGate');
   if(!gate) return;
-  document.body.classList.add('locked');
+  document.body.classList.add('locked','pin-pending');
   gate.classList.add('show');
   gate.setAttribute('aria-hidden','false');
   setTimeout(()=>{ const input=document.getElementById('pinInput'); if(input) input.focus(); },50);
@@ -272,6 +272,13 @@ function sortExpensesByCategory(a,b){
   const dateDiff=String(a.date||'').localeCompare(String(b.date||''));
   if(dateDiff) return dateDiff;
   return String(a.id||'').localeCompare(String(b.id||''));
+}
+function sortExpensesByUsageDateLatest(a,b){
+  const dateDiff=String(b.date||'').localeCompare(String(a.date||''));
+  if(dateDiff) return dateDiff;
+  const createdDiff=expenseCreatedMs(b)-expenseCreatedMs(a);
+  if(createdDiff) return createdDiff;
+  return String(b.id||'').localeCompare(String(a.id||''));
 }
 function categoryPillClass(x){
   if(x.category==='이벤트') return 'event';
@@ -491,15 +498,15 @@ function yearMonthlyAverage(year, category, detailCategory='', eventCategory='')
 }
 function averageCompareMarkup(current, average){
   current=Number(current)||0; average=Number(average)||0;
-  if(average<=0) return `<span class="avg-neutral">연평균 비교 데이터 없음</span>`;
+  if(average<=0) return `<span class="avg-neutral">평균 없음</span>`;
   const pct=((current-average)/average)*100;
-  if(Math.abs(pct)<1) return `<span class="avg-neutral">→ 연평균과 비슷</span>`;
-  if(pct>0) return `<span class="avg-high">↑ 연평균보다 ${Math.abs(pct).toFixed(0)}% 높음</span>`;
-  return `<span class="avg-low">↓ 연평균보다 ${Math.abs(pct).toFixed(0)}% 낮음</span>`;
+  if(Math.abs(pct)<1) return `<span class="avg-neutral">평균 ≈</span>`;
+  if(pct>0) return `<span class="avg-high">평균 +${Math.abs(pct).toFixed(0)}%</span>`;
+  return `<span class="avg-low">평균 -${Math.abs(pct).toFixed(0)}%</span>`;
 }
 function renderDetails(){
   let rows=state.variableExpenses.filter(x=>monthOf(x.date)===selectedMonth);
-  rows.sort(detailsSortMode==='category'?sortExpensesByCategory:sortExpensesNewestRegistered);
+  rows.sort(detailsSortMode==='category'?sortExpensesByCategory:sortExpensesByUsageDateLatest);
   const total=rows.reduce((a,b)=>a+Number(b.amount),0); const year=selectedMonth.slice(0,4);
   const groupCard=(title,category,details)=>{
     const amount=rows.filter(x=>x.category===category).reduce((a,b)=>a+Number(b.amount||0),0);
@@ -520,7 +527,7 @@ function renderDetails(){
   app.innerHTML=`
     <div class="grid cols-3"><div class="card metric"><div class="metric-label">총 변동지출</div><div class="metric-value">${won(total)}</div></div><div class="card metric"><div class="metric-label">등록 건수</div><div class="metric-value">${rows.length}건</div></div><div class="card metric"><div class="metric-label">일 평균 지출</div><div class="metric-value">${won(rows.length?total/new Date(+selectedMonth.slice(0,4),+selectedMonth.slice(5,7),0).getDate():0)}</div></div></div>
     <div class="card section-gap"><div class="card-head"><div><h2>대분류별 지출</h2><p>${year}년 실제 기록이 있는 월 기준 월평균과 비교합니다.</p></div></div><div class="category-summary-grid">${cards}</div></div>
-    <div class="card section-gap"><div class="card-head details-head"><div><h2>${selectedMonth} 세부 내역</h2><p>기본은 최신순이며, 분류별 보기에서는 각 분류 안에서 사용날짜가 오래된 순으로 표시합니다.</p></div><div class="segmented details-sort"><button type="button" class="${detailsSortMode==='latest'?'active':''}" data-sort="latest">최신순</button><button type="button" class="${detailsSortMode==='category'?'active':''}" data-sort="category">분류별</button></div></div><div class="table-wrap">${rows.length?`<table class="table"><thead><tr><th>날짜</th><th>분류</th><th>사용내역</th><th>지출방식</th><th class="amount">금액</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.date)}</td><td><span class="pill ${categoryPillClass(x)}">${esc(expenseDisplayName(x))}</span></td><td>${esc(x.memo||'-')}</td><td>${esc(x.method)}</td><td class="amount"><strong>${won(x.amount)}</strong></td><td><div class="row-actions"><button class="btn small edit-exp" data-id="${x.id}">수정</button><button class="btn small danger delete-exp" data-id="${x.id}">삭제</button></div></td></tr>`).join('')}</tbody></table>`:`<div class="empty">${selectedMonth}에 등록된 내역이 없습니다.</div>`}</div></div>`;
+    <div class="card section-gap"><div class="card-head details-head"><div><h2>${selectedMonth} 세부 내역</h2><p>최신순은 사용날짜 기준 최신순, 분류별은 각 분류 안에서 사용날짜가 오래된 순입니다.</p></div><div class="segmented details-sort"><button type="button" class="${detailsSortMode==='latest'?'active':''}" data-sort="latest">최신순</button><button type="button" class="${detailsSortMode==='category'?'active':''}" data-sort="category">분류별</button></div></div><div class="table-wrap">${rows.length?`<table class="table"><thead><tr><th>날짜</th><th>분류</th><th>사용내역</th><th>지출방식</th><th class="amount">금액</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.date)}</td><td><span class="pill ${categoryPillClass(x)}">${esc(expenseDisplayName(x))}</span></td><td>${esc(x.memo||'-')}</td><td>${esc(x.method)}</td><td class="amount"><strong>${won(x.amount)}</strong></td><td><div class="row-actions"><button class="btn small edit-exp" data-id="${x.id}">수정</button><button class="btn small danger delete-exp" data-id="${x.id}">삭제</button></div></td></tr>`).join('')}</tbody></table>`:`<div class="empty">${selectedMonth}에 등록된 내역이 없습니다.</div>`}</div></div>`;
   document.querySelectorAll('.details-sort button').forEach(b=>b.onclick=()=>{detailsSortMode=b.dataset.sort||'latest';renderDetails();});
   document.querySelectorAll('.delete-exp').forEach(b=>b.onclick=()=>{if(confirm('이 지출 내역을 삭제할까요?')){state.variableExpenses=state.variableExpenses.filter(x=>x.id!==b.dataset.id);saveState();renderDetails()}});
   document.querySelectorAll('.edit-exp').forEach(b=>b.onclick=()=>renderExpenseEdit(b.dataset.id));
@@ -657,7 +664,11 @@ function renderCards(){
         </form>
       </div>
       <div class="card"><div class="card-head"><div><h2>이번 달 카드 기록</h2><p>${rows.length}건의 청구·확인 기록</p></div></div>
-        ${rows.length?`<div class="summary-list">${rows.sort((a,b)=>String(b.id||'').localeCompare(String(a.id||''))).map(x=>`<div class="summary-line"><span>${esc((x.owner||'')+(x.cardType?' · '+x.cardType:''))}</span><div class="muted">${esc(x.memo||'-')}</div><strong>${won(x.amount)}</strong></div>`).join('')}</div>`:`<div class="empty">등록된 카드 기록이 없습니다.</div>`}
+        ${rows.length?`<div class="card-record-table">${rows.sort((a,b)=>String(b.id||'').localeCompare(String(a.id||''))).map(x=>`<div class="card-record-row">
+          <div class="card-record-main"><span class="card-record-name">${esc((x.owner||'')+(x.cardType?' · '+x.cardType:''))}</span><span class="card-record-memo">${esc(x.memo||'-')}</span></div>
+          <strong class="card-record-amount">${won(x.amount)}</strong>
+          <div class="card-record-actions"><button type="button" class="btn small edit-card-record" data-id="${x.id}">수정</button><button type="button" class="btn small danger delete-card-record" data-id="${x.id}">삭제</button></div>
+        </div>`).join('')}</div>`:`<div class="empty">등록된 카드 기록이 없습니다.</div>`}
       </div>
     </div>`;
 
@@ -691,7 +702,63 @@ function renderCards(){
     state.cardRecords.push({id:id(),month:selectedMonth,owner,cardType,card:owner+'카드',amount,memo,createdAt:new Date().toISOString()});
     formDirty=false;saveState();renderCards();
   };
+
+  document.querySelectorAll('.delete-card-record').forEach(b=>b.onclick=()=>{
+    if(!confirm('이 카드 기록을 삭제할까요?')) return;
+    state.cardRecords=state.cardRecords.filter(x=>x.id!==b.dataset.id);
+    formDirty=false;saveState();renderCards();
+  });
+  document.querySelectorAll('.edit-card-record').forEach(b=>b.onclick=()=>renderCardRecordEdit(b.dataset.id));
 }
+
+function renderCardRecordEdit(recordId){
+  const x=state.cardRecords.find(r=>r.id===recordId);
+  if(!x){renderCards();return;}
+  const owner=x.owner||((x.card==='아내카드')?'아내':'남편');
+  const cards=owner==='남편'?(state.settings.husbandCards||[]):(state.settings.wifeCards||[]);
+  app.innerHTML=`<div class="card card-record-edit">
+    <div class="card-head"><div><h2>카드 기록 수정</h2><p>카드 청구 확인용 기록을 수정합니다.</p></div></div>
+    <form id="cardRecordEditForm" novalidate>
+      <div class="field"><label>사용자</label><div class="segmented owner-tabs" id="editOwnerTabs"><button type="button" class="${owner==='남편'?'active':''}" data-owner="남편">남편카드</button><button type="button" class="${owner==='아내'?'active':''}" data-owner="아내">아내카드</button></div></div>
+      <input type="hidden" name="owner" id="editCardOwner" value="${esc(owner)}">
+      <input type="hidden" name="cardType" id="editCardType" value="${esc(x.cardType||cards[0]||'')}">
+      <div class="field section-gap-sm"><label>카드 종류</label><div class="card-type-tabs" id="editCardTypeTabs"></div></div>
+      <div class="form-grid section-gap">
+        <div class="field"><label>금액</label><input name="amount" type="number" min="0" inputmode="numeric" value="${Number(x.amount)||0}"></div>
+        <div class="field"><label>기록명</label><input name="memo" value="${esc(x.memo||'')}"></div>
+      </div>
+      <div class="button-row"><button type="button" class="btn" id="cancelCardRecordEdit">취소</button><button class="btn primary" type="submit">수정 저장</button></div>
+    </form>
+  </div>`;
+
+  const ownerInput=document.getElementById('editCardOwner');
+  const typeInput=document.getElementById('editCardType');
+  const ownerTabs=document.getElementById('editOwnerTabs');
+  const typeTabs=document.getElementById('editCardTypeTabs');
+  function drawTypes(){
+    const list=ownerInput.value==='남편'?(state.settings.husbandCards||[]):(state.settings.wifeCards||[]);
+    if(!list.includes(typeInput.value)) typeInput.value=list[0]||'';
+    typeTabs.innerHTML=list.map(c=>`<button type="button" class="card-type-tab ${c===typeInput.value?'active':''}" data-type="${esc(c)}">${esc(c)}</button>`).join('');
+    typeTabs.querySelectorAll('button').forEach(b=>b.onclick=()=>{typeInput.value=b.dataset.type;typeTabs.querySelectorAll('button').forEach(q=>q.classList.toggle('active',q===b));});
+  }
+  ownerTabs.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    ownerInput.value=b.dataset.owner;
+    ownerTabs.querySelectorAll('button').forEach(q=>q.classList.toggle('active',q===b));
+    typeInput.value='';
+    drawTypes();
+  });
+  drawTypes();
+  document.getElementById('cancelCardRecordEdit').onclick=()=>renderCards();
+  document.getElementById('cardRecordEditForm').onsubmit=e=>{
+    e.preventDefault();
+    const f=new FormData(e.target),newOwner=String(f.get('owner')||''),newType=String(f.get('cardType')||''),amount=Number(f.get('amount')),memo=String(f.get('memo')||'').trim();
+    if(!newOwner||!newType){toast('사용자와 카드 종류를 선택해 주세요.');return;}
+    if(!Number.isFinite(amount)||amount<0){toast('올바른 카드 금액을 입력해 주세요.');return;}
+    Object.assign(x,{owner:newOwner,cardType:newType,card:newOwner+'카드',amount,memo,updatedAt:new Date().toISOString()});
+    formDirty=false;saveState();toast('카드 기록을 수정했습니다.');renderCards();
+  };
+}
+
 function renderSettings(){
   app.innerHTML=`<div class="grid cols-2">
     <div class="card"><div class="card-head"><div><h2>이벤트 세부분류</h2><p>경조사·병원·교회 등 필요에 따라 추가할 수 있습니다.</p></div></div><div class="list-editor" id="eventList">${state.settings.eventCategories.map((x,i)=>`<div class="edit-row"><input value="${esc(x)}" data-i="${i}"><span></span><button class="icon-btn ghost event-del" data-i="${i}">×</button></div>`).join('')}</div><div class="divider"></div><div class="inline-add"><input id="newEvent" placeholder="새 이벤트 분류"><button class="btn primary" id="addEvent">추가</button></div></div>

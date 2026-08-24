@@ -399,3 +399,91 @@ body[data-theme="lovable"] .month-picker-wrap{background:rgba(255,255,255,.78)}
  .owner-tabs{width:100%}.owner-tabs button{flex:1}
  .card-type-tabs{gap:6px}.card-type-tab{padding:8px 11px;font-size:10.5px}
 }
+
+
+/* v9 security: never expose app content before PIN gate decision */
+body.pin-pending .app-shell{visibility:hidden!important}
+body.pin-pending .pin-gate{visibility:visible!important}
+
+/* v9 responsive foundation */
+html,body{max-width:100%;overflow-x:hidden}
+.main,.card,.grid,.metric,.category-summary-card,.event-summary-card,.summary-line,.card-record-row{min-width:0}
+.metric-value,.category-summary-head strong,.card-record-amount{
+  max-width:100%;
+  overflow-wrap:anywhere;
+  word-break:keep-all;
+  line-height:1.08;
+}
+.metric-value{font-size:clamp(20px,2.15vw,30px)!important}
+.category-summary-head strong{
+  white-space:nowrap;
+  font-size:clamp(14px,1.35vw,18px)!important;
+  letter-spacing:-.03em;
+}
+.category-summary-head span{min-width:0}
+.category-average{font-size:9.5px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.event-summary-line{
+  grid-template-columns:minmax(44px,.8fr) minmax(76px,1fr) minmax(62px,.8fr)!important;
+  gap:6px!important;
+}
+.event-summary-line strong{white-space:nowrap;font-size:10.5px!important}
+.event-avg{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:9px!important}
+
+/* Wider amount room: 4 across only when there is enough width */
+.category-summary-grid{grid-template-columns:repeat(4,minmax(190px,1fr))!important;overflow-x:auto;padding-bottom:4px}
+.category-summary-card{padding:15px!important}
+@media(max-width:1180px){
+  .category-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;overflow:visible}
+}
+@media(max-width:680px){
+  .category-summary-grid{grid-template-columns:1fr!important}
+}
+
+/* General grids should collapse before content overflows */
+@media(max-width:1250px){
+  .grid.cols-4{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:980px){
+  .grid.cols-3{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .grid.cols-2{grid-template-columns:1fr!important}
+}
+@media(max-width:620px){
+  .grid.cols-3,.grid.cols-4{grid-template-columns:1fr!important}
+}
+
+/* Tables: scroll instead of breaking card width */
+.table-wrap{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.table{width:max-content;min-width:100%}
+
+/* Card record responsive rows */
+.card-record-table{display:grid;gap:0}
+.card-record-row{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(92px,auto) auto;
+  gap:10px;
+  align-items:center;
+  padding:12px 2px;
+  border-bottom:1px solid var(--line);
+}
+.card-record-row:last-child{border-bottom:0}
+.card-record-main{display:grid;gap:4px;min-width:0}
+.card-record-name{font-size:11px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-record-memo{font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-record-amount{font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
+.card-record-actions{display:flex;gap:5px;white-space:nowrap}
+@media(max-width:700px){
+  .card-record-row{grid-template-columns:minmax(0,1fr) auto;gap:7px}
+  .card-record-actions{grid-column:1/-1;justify-content:flex-end}
+}
+@media(max-width:430px){
+  .card-record-row{grid-template-columns:1fr}
+  .card-record-amount{text-align:left}
+  .card-record-actions{grid-column:auto;justify-content:flex-start}
+}
+
+/* Header and month control remain usable at intermediate widths */
+@media(max-width:900px) and (min-width:761px){
+  .main{padding-left:24px;padding-right:24px}
+  .topbar{min-height:96px}
+  .topbar h1{font-size:25px}
+}
