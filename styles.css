@@ -487,3 +487,29 @@ html,body{max-width:100%;overflow-x:hidden}
   .topbar{min-height:96px}
   .topbar h1{font-size:25px}
 }
+
+/* v10 current month shortcut */
+.current-month-btn{border:1px solid var(--line);background:rgba(255,255,255,.76);border-radius:999px;padding:8px 11px;font:inherit;font-size:10px;font-weight:700;color:var(--accent);white-space:nowrap}
+.current-month-btn[hidden]{display:none!important}
+
+/* variable expense payment tabs */
+.expense-method-tabs{width:max-content;max-width:100%}
+.expense-method-tabs button{min-width:82px}
+@media(max-width:520px){.expense-method-tabs{width:100%}.expense-method-tabs button{flex:1;min-width:0;padding-left:6px;padding-right:6px}}
+
+/* settlement */
+.settlement-field{padding-top:2px}
+.settlement-toggle{display:flex!important;align-items:center;gap:8px;cursor:pointer;color:var(--ink)!important}
+.settlement-toggle input{width:18px!important;height:18px!important;min-height:18px!important;appearance:auto!important;-webkit-appearance:checkbox!important}
+.hidden{display:none!important}
+.tiny-note{font-size:9px;margin-top:4px;white-space:nowrap}
+
+/* sortable settings */
+.reorder-row{grid-template-columns:minmax(0,1fr) auto!important}
+.reorder-actions{display:flex;align-items:center;gap:3px}
+.reorder-actions .icon-btn{width:31px;height:36px}
+.card-setting-row{grid-template-columns:minmax(0,1fr) auto!important}
+@media(max-width:520px){.reorder-actions .icon-btn{width:28px;height:34px}}
+
+/* current month control responsive */
+@media(max-width:760px){.current-month-btn{font-size:9px;padding:7px 8px}}

@@ -27,6 +27,9 @@ const API_URL = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.API_URL) || '';
 let PIN_HASH = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.PIN_HASH) || '';
 const DEFAULT_PIN_HASH = PIN_HASH;
 const PIN_SESSION_KEY = 'coupleBudget_pin_ok_v1';
+const PIN_CACHE_KEY = 'coupleBudget_pin_hash_cache_v1';
+const cachedPinHash = localStorage.getItem(PIN_CACHE_KEY) || '';
+if(cachedPinHash) PIN_HASH=cachedPinHash;
 let syncing = false;
 let pendingSave = false;
 let formDirty = false;
@@ -39,7 +42,8 @@ function snapshotExpenseDraft(form){
     amount:String(f.get('amount')||''),
     date:String(f.get('date')||''),
     method:String(f.get('method')||''),
-    memo:String(f.get('memo')||'')
+    memo:String(f.get('memo')||''),
+    reimbursedAmount:String(f.get('reimbursedAmount')||'')
   };
   formDirty=true;
 }
@@ -86,24 +90,53 @@ async function refreshPinHash(){
   if(!apiConfigured()) return PIN_HASH;
   try{
     const res=await jsonpRequest({action:'getPinConfig'});
-    if(res && res.ok && res.pinHash) PIN_HASH=res.pinHash;
+    if(res && res.ok && res.pinHash){ PIN_HASH=res.pinHash; localStorage.setItem(PIN_CACHE_KEY,PIN_HASH); }
   }catch(err){ console.warn('PIN 설정 불러오기 실패, config.js 기본값 사용',err); }
   return PIN_HASH;
 }
 async function initPinGate(){
-  await refreshPinHash();
-  if(!PIN_HASH || sessionStorage.getItem(PIN_SESSION_KEY)==='1'){ unlockApp(); return; }
-  lockApp();
   const form=document.getElementById('pinForm');
   const input=document.getElementById('pinInput');
   const error=document.getElementById('pinError');
-  form.onsubmit=async(e)=>{
-    e.preventDefault();
-    const h=await sha256(input.value);
-    if(h===PIN_HASH){ error.textContent=''; input.value=''; unlockApp(); remoteLoad(); }
-    else { error.textContent='PIN이 올바르지 않습니다.'; input.select(); }
+
+  if(sessionStorage.getItem(PIN_SESSION_KEY)==='1'){
+    unlockApp();
+    refreshPinHash();
+    remoteLoad();
+    return;
+  }
+
+  lockApp();
+
+  form.onsubmit=async(ev)=>{
+    ev.preventDefault();
+    const h=await sha256(input.value||'');
+    if(PIN_HASH && h===PIN_HASH){
+      error.textContent='';
+      input.value='';
+      unlockApp();
+      remoteLoad();
+      refreshPinHash();
+      return;
+    }
+    await refreshPinHash();
+    if(PIN_HASH && h===PIN_HASH){
+      error.textContent='';
+      input.value='';
+      unlockApp();
+      remoteLoad();
+    } else {
+      error.textContent='PIN이 올바르지 않습니다.';
+      input.select();
+    }
   };
+
+  // 서버 확인은 백그라운드에서 수행해 PIN 입력 자체를 막지 않습니다.
+  refreshPinHash().then(()=>{
+    if(!PIN_HASH){ unlockApp(); remoteLoad(); }
+  });
 }
+
 async function changeSharedPin(currentPin,newPin){
   const currentHash=await sha256(currentPin);
   if(currentHash!==PIN_HASH) throw new Error('현재 PIN이 올바르지 않습니다.');
@@ -161,7 +194,18 @@ const nav = document.getElementById('nav');
 const pageTitle = document.getElementById('pageTitle');
 const pageSubtitle = document.getElementById('pageSubtitle');
 const globalMonth = document.getElementById('globalMonth');
+const currentMonthBtn = document.getElementById('currentMonthBtn');
 globalMonth.value = selectedMonth;
+function updateCurrentMonthButton(){
+  if(!currentMonthBtn) return;
+  currentMonthBtn.hidden = activePage==='summary' || selectedMonth===currentMonth;
+}
+currentMonthBtn.onclick=()=>{
+  selectedMonth=currentMonth;
+  globalMonth.value=currentMonth;
+  formDirty=false;
+  render();
+};
 
 function normalizeStateModel(input){
   const s={...structuredClone(defaultState),...(input||{})};
@@ -216,6 +260,7 @@ function render(){
   const meta = pages.find(p=>p[0]===activePage);
   pageTitle.textContent = meta[2]; pageSubtitle.textContent = meta[3];
   globalMonth.style.display = activePage==='summary' ? 'none' : '';
+  updateCurrentMonthButton();
   if(activePage==='add') renderAdd();
   if(activePage==='details') renderDetails();
   if(activePage==='summary') renderSummary();
@@ -226,7 +271,7 @@ function render(){
   bindGlobalFormDirtyGuard();
 }
 
-globalMonth.onchange=()=>{ selectedMonth=globalMonth.value || currentMonth; render(); };
+globalMonth.onchange=()=>{ selectedMonth=globalMonth.value || currentMonth; formDirty=false; render(); updateCurrentMonthButton(); };
 
 document.getElementById('menuBtn').onclick=()=>{
   document.getElementById('sidebar').classList.add('open');
@@ -287,6 +332,9 @@ function categoryPillClass(x){
   if(x.category==='고정') return 'fixed';
   return '';
 }
+function reimbursementAmount(x){ return Math.max(0,Number((x&&x.reimbursedAmount)||0)); }
+function effectiveExpenseAmount(x){ return Math.max(0,Number((x&&x.amount)||0)-reimbursementAmount(x)); }
+
 async function protectedSetMonthlyLimit(month,amount,loginPin){
   const loginHash=await sha256(loginPin);
   if(!PIN_HASH || loginHash!==PIN_HASH) throw new Error('가계부 접속 PIN이 올바르지 않습니다.');
@@ -309,11 +357,11 @@ function monthStats(month){
   const income = (state.incomes[month]||[]).reduce((a,b)=>a+Number(b.amount||0),0);
   const fixed = (state.fixedExpenses[month]||[]).reduce((a,b)=>a+Number(b.amount||0),0);
   const monthExpenses = state.variableExpenses.filter(x=>monthOf(x.date)===month);
-  const totalVariable = monthExpenses.reduce((a,b)=>a+Number(b.amount||0),0);
+  const totalVariable = monthExpenses.reduce((a,b)=>a+effectiveExpenseAmount(b),0);
   // 가용금액은 생활성 지출만 차감: 카드 고정지출(고정)과 이벤트는 제외
   const budgetVariable = monthExpenses
     .filter(x=>x.category!=='고정' && x.category!=='이벤트')
-    .reduce((a,b)=>a+Number(b.amount||0),0);
+    .reduce((a,b)=>a+effectiveExpenseAmount(b),0);
   const limit = Number(state.monthlyLimits[month] || Math.max(income-fixed,0));
   return {income,fixed,variable:totalVariable,budgetVariable,limit,remaining:limit-budgetVariable};
 }
@@ -391,8 +439,15 @@ function renderAdd(){
             <div class="field"><label>대분류</label><select name="categoryChoice" id="expenseCat">${options.map(o=>`<option value="${esc(o.value)}" ${o.value===draftChoice?'selected':''}>${esc(o.label)}</option>`).join('')}</select></div>
             <div class="field"><label>사용금액</label><input name="amount" type="number" min="1" inputmode="numeric" placeholder="예: 35000" value="${esc(draftAmount)}"></div>
             <div class="field"><label>사용날짜</label><input name="date" type="date" value="${esc(draftDate)}"></div>
-            <div class="field"><label>지출방식</label><select name="method">${state.settings.methods.map(c=>`<option ${c===draftMethod?'selected':''}>${esc(c)}</option>`).join('')}</select></div>
+            <div class="field full"><label>지출방식</label><input type="hidden" name="method" id="expenseMethod" value="${esc(draftMethod||'남편카드')}"><div class="segmented expense-method-tabs" id="expenseMethodTabs">${['남편카드','아내카드','현금'].map(m=>`<button type="button" class="${m===(draftMethod||'남편카드')?'active':''}" data-method="${m}">${m}</button>`).join('')}</div></div>
             <div class="field full"><label>사용내역</label><input name="memo" placeholder="예: 마트 장보기, 아기 기저귀, 외식" value="${esc(draftMemo)}"></div>
+          <div class="field full settlement-field">
+            <label class="settlement-toggle"><input type="checkbox" id="settlementToggle" ${Number(draft.reimbursedAmount||0)>0?'checked':''}><span>대납·정산 있음</span></label>
+            <div id="settlementAmountWrap" class="${Number(draft.reimbursedAmount||0)>0?'':'hidden'}">
+              <input name="reimbursedAmount" type="number" min="0" inputmode="numeric" placeholder="돌려받았거나 받을 금액" value="${esc(draft.reimbursedAmount||'')}">
+              <div class="helper-text">가계부 지출에는 결제액에서 회수금액을 뺀 금액만 반영됩니다.</div>
+            </div>
+          </div>
           </div>
           <div id="expenseFormMsg" class="helper-text"></div>
           <div class="button-row"><button type="submit" class="btn primary">지출 등록</button></div>
@@ -423,11 +478,28 @@ function renderAdd(){
     formDirty=true;
     document.querySelectorAll('#quickCats .chip').forEach(x=>x.classList.toggle('active',x===b));
   });
+  const methodInput=document.getElementById('expenseMethod');
+  document.querySelectorAll('#expenseMethodTabs button').forEach(b=>b.onclick=()=>{
+    methodInput.value=b.dataset.method;
+    document.querySelectorAll('#expenseMethodTabs button').forEach(x=>x.classList.toggle('active',x===b));
+    snapshotExpenseDraft(form);
+    expenseDraft={...(expenseDraft||{}),method:methodInput.value};
+    formDirty=true;
+  });
+  const settlementToggle=document.getElementById('settlementToggle');
+  const settlementWrap=document.getElementById('settlementAmountWrap');
+  settlementToggle.onchange=()=>{
+    settlementWrap.classList.toggle('hidden',!settlementToggle.checked);
+    if(!settlementToggle.checked && form.elements.reimbursedAmount) form.elements.reimbursedAmount.value='';
+    snapshotExpenseDraft(form);
+  };
+
 
   form.onsubmit=e=>{
     e.preventDefault();
     const f=new FormData(form);
     const amount=Number(f.get('amount'));
+    const reimbursedAmount=Number(f.get('reimbursedAmount')||0);
     const date=String(f.get('date')||'').trim();
     const method=String(f.get('method')||'').trim();
     const choice=String(f.get('categoryChoice')||defaultValue).trim();
@@ -440,7 +512,7 @@ function renderAdd(){
     const createdNow=new Date().toISOString();
     state.variableExpenses.push({
       id:id(),category:parsed.category,detailCategory:parsed.detailCategory,eventCategory:parsed.eventCategory,
-      amount,date,memo:String(f.get('memo')||'').trim(),method,
+      amount,reimbursedAmount,date,memo:String(f.get('memo')||'').trim(),method,
       createdAt:createdNow,updatedAt:createdNow
     });
     formDirty=false;
@@ -493,7 +565,7 @@ function yearMonthlyAverage(year, category, detailCategory='', eventCategory='')
     .filter(x=>x.category===category)
     .filter(x=>!detailCategory || x.detailCategory===detailCategory)
     .filter(x=>category!=='이벤트' || !eventCategory || x.eventCategory===eventCategory)
-    .reduce((a,b)=>a+Number(b.amount||0),0);
+    .reduce((a,b)=>a+effectiveExpenseAmount(b),0);
   return total/months.length;
 }
 function averageCompareMarkup(current, average){
@@ -507,12 +579,12 @@ function averageCompareMarkup(current, average){
 function renderDetails(){
   let rows=state.variableExpenses.filter(x=>monthOf(x.date)===selectedMonth);
   rows.sort(detailsSortMode==='category'?sortExpensesByCategory:sortExpensesByUsageDateLatest);
-  const total=rows.reduce((a,b)=>a+Number(b.amount),0); const year=selectedMonth.slice(0,4);
+  const total=rows.reduce((a,b)=>a+effectiveExpenseAmount(b),0); const year=selectedMonth.slice(0,4);
   const groupCard=(title,category,details)=>{
-    const amount=rows.filter(x=>x.category===category).reduce((a,b)=>a+Number(b.amount||0),0);
+    const amount=rows.filter(x=>x.category===category).reduce((a,b)=>a+effectiveExpenseAmount(b),0);
     const avg=yearMonthlyAverage(year,category);
     const lines=details.map(d=>{
-      const val=rows.filter(x=>x.category===category && (category==='이벤트'?x.eventCategory===d:x.detailCategory===d)).reduce((a,b)=>a+Number(b.amount||0),0);
+      const val=rows.filter(x=>x.category===category && (category==='이벤트'?x.eventCategory===d:x.detailCategory===d)).reduce((a,b)=>a+effectiveExpenseAmount(b),0);
       const av=category==='이벤트'?yearMonthlyAverage(year,category,'',d):yearMonthlyAverage(year,category,d,'');
       return `<div class="event-summary-line"><span>${esc(d)}</span><strong>${won(val)}</strong><span class="event-avg">${averageCompareMarkup(val,av)}</span></div>`;
     }).join('');
@@ -527,7 +599,7 @@ function renderDetails(){
   app.innerHTML=`
     <div class="grid cols-3"><div class="card metric"><div class="metric-label">총 변동지출</div><div class="metric-value">${won(total)}</div></div><div class="card metric"><div class="metric-label">등록 건수</div><div class="metric-value">${rows.length}건</div></div><div class="card metric"><div class="metric-label">일 평균 지출</div><div class="metric-value">${won(rows.length?total/new Date(+selectedMonth.slice(0,4),+selectedMonth.slice(5,7),0).getDate():0)}</div></div></div>
     <div class="card section-gap"><div class="card-head"><div><h2>대분류별 지출</h2><p>${year}년 실제 기록이 있는 월 기준 월평균과 비교합니다.</p></div></div><div class="category-summary-grid">${cards}</div></div>
-    <div class="card section-gap"><div class="card-head details-head"><div><h2>${selectedMonth} 세부 내역</h2><p>최신순은 사용날짜 기준 최신순, 분류별은 각 분류 안에서 사용날짜가 오래된 순입니다.</p></div><div class="segmented details-sort"><button type="button" class="${detailsSortMode==='latest'?'active':''}" data-sort="latest">최신순</button><button type="button" class="${detailsSortMode==='category'?'active':''}" data-sort="category">분류별</button></div></div><div class="table-wrap">${rows.length?`<table class="table"><thead><tr><th>날짜</th><th>분류</th><th>사용내역</th><th>지출방식</th><th class="amount">금액</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.date)}</td><td><span class="pill ${categoryPillClass(x)}">${esc(expenseDisplayName(x))}</span></td><td>${esc(x.memo||'-')}</td><td>${esc(x.method)}</td><td class="amount"><strong>${won(x.amount)}</strong></td><td><div class="row-actions"><button class="btn small edit-exp" data-id="${x.id}">수정</button><button class="btn small danger delete-exp" data-id="${x.id}">삭제</button></div></td></tr>`).join('')}</tbody></table>`:`<div class="empty">${selectedMonth}에 등록된 내역이 없습니다.</div>`}</div></div>`;
+    <div class="card section-gap"><div class="card-head details-head"><div><h2>${selectedMonth} 세부 내역</h2><p>최신순은 사용날짜 기준 최신순, 분류별은 각 분류 안에서 사용날짜가 오래된 순입니다.</p></div><div class="segmented details-sort"><button type="button" class="${detailsSortMode==='latest'?'active':''}" data-sort="latest">최신순</button><button type="button" class="${detailsSortMode==='category'?'active':''}" data-sort="category">분류별</button></div></div><div class="table-wrap">${rows.length?`<table class="table"><thead><tr><th>날짜</th><th>분류</th><th>사용내역</th><th>지출방식</th><th class="amount">금액</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.date)}</td><td><span class="pill ${categoryPillClass(x)}">${esc(expenseDisplayName(x))}</span></td><td>${esc(x.memo||'-')}</td><td>${esc(x.method)}</td><td class="amount"><strong>${won(effectiveExpenseAmount(x))}</strong>${reimbursementAmount(x)>0?`<div class="muted tiny-note">결제 ${won(x.amount)} · 회수 ${won(reimbursementAmount(x))}</div>`:''}</td><td><div class="row-actions"><button class="btn small edit-exp" data-id="${x.id}">수정</button><button class="btn small danger delete-exp" data-id="${x.id}">삭제</button></div></td></tr>`).join('')}</tbody></table>`:`<div class="empty">${selectedMonth}에 등록된 내역이 없습니다.</div>`}</div></div>`;
   document.querySelectorAll('.details-sort button').forEach(b=>b.onclick=()=>{detailsSortMode=b.dataset.sort||'latest';renderDetails();});
   document.querySelectorAll('.delete-exp').forEach(b=>b.onclick=()=>{if(confirm('이 지출 내역을 삭제할까요?')){state.variableExpenses=state.variableExpenses.filter(x=>x.id!==b.dataset.id);saveState();renderDetails()}});
   document.querySelectorAll('.edit-exp').forEach(b=>b.onclick=()=>renderExpenseEdit(b.dataset.id));
@@ -546,7 +618,7 @@ function renderExpenseEdit(expenseId){
         <div class="field"><label>사용금액</label><input name="amount" type="number" min="1" inputmode="numeric" value="${Number(x.amount)||0}"></div>
         <div class="field"><label>사용날짜</label><input name="date" type="date" value="${esc(x.date)}"></div>
         <div class="field"><label>지출방식</label><select name="method">${state.settings.methods.map(m=>`<option ${m===x.method?'selected':''}>${esc(m)}</option>`).join('')}</select></div>
-        <div class="field full"><label>사용내역</label><input name="memo" value="${esc(x.memo||'')}"></div>
+        <div class="field full"><label>사용내역</label><input name="memo" value="${esc(x.memo||'')}"></div><div class="field full"><label>대납·정산 회수금액</label><input name="reimbursedAmount" type="number" min="0" inputmode="numeric" value="${reimbursementAmount(x)}"><div class="helper-text">없으면 0원</div></div>
       </div>
       <div id="editExpenseMsg" class="helper-text"></div>
       <div class="button-row"><button type="button" class="btn" id="cancelExpenseEdit">취소</button><button type="submit" class="btn primary">수정 저장</button></div>
@@ -557,16 +629,17 @@ function renderExpenseEdit(expenseId){
     e.preventDefault();
     const f=new FormData(e.target);
     const amount=Number(f.get('amount'));
+    const reimbursedAmount=Number(f.get('reimbursedAmount')||0);
     const date=String(f.get('date')||'').trim();
     const method=String(f.get('method')||'').trim();
     const parsed=parseExpenseCategory(String(f.get('categoryChoice')||''));
     const msg=document.getElementById('editExpenseMsg');
-    if(!parsed.category || !Number.isFinite(amount) || amount<=0 || !date || !method){
+    if(!parsed.category || !Number.isFinite(amount) || amount<=0 || !date || !method || !Number.isFinite(reimbursedAmount) || reimbursedAmount<0 || reimbursedAmount>amount){
       msg.textContent='대분류, 금액, 날짜, 지출방식을 확인해 주세요.';
       msg.className='helper-text error';
       return;
     }
-    Object.assign(x,{category:parsed.category,detailCategory:parsed.detailCategory,eventCategory:parsed.eventCategory,amount,date,method,memo:String(f.get('memo')||'').trim()});
+    Object.assign(x,{category:parsed.category,detailCategory:parsed.detailCategory,eventCategory:parsed.eventCategory,amount,reimbursedAmount,date,method,memo:String(f.get('memo')||'').trim(),updatedAt:new Date().toISOString()});
     formDirty=false;
     saveState();
     toast('지출 내역을 수정했습니다.');
@@ -574,6 +647,23 @@ function renderExpenseEdit(expenseId){
     globalMonth.value=selectedMonth;
     renderDetails();
   };
+}
+
+function renderSummary(){
+  const year=String(selectedMonth||currentMonth).slice(0,4);
+  const months=Array.from({length:12},(_,i)=>`${year}-${pad(i+1)}`);
+  const stats=months.map(m=>({month:m,...monthStats(m)}));
+  const income=stats.reduce((a,b)=>a+b.income,0);
+  const fixed=stats.reduce((a,b)=>a+b.fixed,0);
+  const variable=stats.reduce((a,b)=>a+b.variable,0);
+  app.innerHTML=`<div class="grid cols-3">
+    <div class="card metric positive"><div class="metric-label">${year} 수입</div><div class="metric-value">${won(income)}</div></div>
+    <div class="card metric"><div class="metric-label">${year} 기본지출(현금고정)</div><div class="metric-value">${won(fixed)}</div></div>
+    <div class="card metric negative"><div class="metric-label">${year} 변동지출</div><div class="metric-value">${won(variable)}</div></div>
+  </div>
+  <div class="card section-gap"><div class="card-head"><div><h2>${year} 월별 흐름</h2><p>각 월의 수입과 지출을 간단히 비교합니다.</p></div></div>
+    <div class="year-grid">${stats.map(s=>`<div class="month-box"><strong>${Number(s.month.slice(5))}월</strong><span>수입 ${won(s.income)}</span><span>지출 ${won(s.fixed+s.variable)}</span><em>${won(s.income-s.fixed-s.variable)}</em></div>`).join('')}</div>
+  </div>`;
 }
 
 function renderIncome(){
@@ -622,6 +712,20 @@ function bindEditor(type){
     saveState();toast('수정되었습니다.');
   });
   document.querySelectorAll('.delete-edit').forEach(b=>b.onclick=()=>{if(type==='income')state.incomes[selectedMonth]=arr().filter(x=>x.id!==b.dataset.id);else state.fixedExpenses[selectedMonth]=arr().filter(x=>x.id!==b.dataset.id);saveState();render()});
+}
+
+async function remoteUpsertCardRecord(record){
+  if(!apiConfigured()) return false;
+  const payload=btoa(unescape(encodeURIComponent(JSON.stringify(record))));
+  const res=await jsonpRequest({action:'upsertCardRecord',payload64:payload});
+  if(!res||!res.ok) throw new Error((res&&res.error)||'카드 기록 저장 실패');
+  return true;
+}
+async function remoteDeleteCardRecord(recordId){
+  if(!apiConfigured()) return false;
+  const res=await jsonpRequest({action:'deleteCardRecord',id:String(recordId)});
+  if(!res||!res.ok) throw new Error((res&&res.error)||'카드 기록 삭제 실패');
+  return true;
 }
 
 function renderCards(){
@@ -699,14 +803,20 @@ function renderCards(){
     if(!owner){toast('남편카드 또는 아내카드를 선택해 주세요.');return;}
     if(!cardType){toast('카드 종류를 선택해 주세요.');return;}
     if(!Number.isFinite(amount)||amount<0){toast('올바른 카드 금액을 입력해 주세요.');e.target.elements.amount.focus();return;}
-    state.cardRecords.push({id:id(),month:selectedMonth,owner,cardType,card:owner+'카드',amount,memo,createdAt:new Date().toISOString()});
-    formDirty=false;saveState();renderCards();
+    const rec={id:id(),month:selectedMonth,owner,cardType,card:owner+'카드',amount,memo,createdAt:new Date().toISOString()};
+    state.cardRecords.push(rec);
+    formDirty=false;saveLocalOnly();renderCards();
+    remoteUpsertCardRecord(rec).then(()=>setSyncStatus('카드 기록 저장됨')).catch(err=>{setSyncStatus('카드 기록 저장 오류',false);console.error(err);});
+    remoteSave();
   };
 
   document.querySelectorAll('.delete-card-record').forEach(b=>b.onclick=()=>{
     if(!confirm('이 카드 기록을 삭제할까요?')) return;
-    state.cardRecords=state.cardRecords.filter(x=>x.id!==b.dataset.id);
-    formDirty=false;saveState();renderCards();
+    const rid=b.dataset.id;
+    state.cardRecords=state.cardRecords.filter(x=>x.id!==rid);
+    formDirty=false;saveLocalOnly();renderCards();
+    remoteDeleteCardRecord(rid).catch(err=>{setSyncStatus('카드 기록 삭제 오류',false);console.error(err);});
+    remoteSave();
   });
   document.querySelectorAll('.edit-card-record').forEach(b=>b.onclick=()=>renderCardRecordEdit(b.dataset.id));
 }
@@ -755,13 +865,15 @@ function renderCardRecordEdit(recordId){
     if(!newOwner||!newType){toast('사용자와 카드 종류를 선택해 주세요.');return;}
     if(!Number.isFinite(amount)||amount<0){toast('올바른 카드 금액을 입력해 주세요.');return;}
     Object.assign(x,{owner:newOwner,cardType:newType,card:newOwner+'카드',amount,memo,updatedAt:new Date().toISOString()});
-    formDirty=false;saveState();toast('카드 기록을 수정했습니다.');renderCards();
+    formDirty=false;saveLocalOnly();toast('카드 기록을 수정했습니다.');renderCards();
+    remoteUpsertCardRecord(x).catch(err=>{setSyncStatus('카드 기록 수정 오류',false);console.error(err);});
+    remoteSave();
   };
 }
 
 function renderSettings(){
   app.innerHTML=`<div class="grid cols-2">
-    <div class="card"><div class="card-head"><div><h2>이벤트 세부분류</h2><p>경조사·병원·교회 등 필요에 따라 추가할 수 있습니다.</p></div></div><div class="list-editor" id="eventList">${state.settings.eventCategories.map((x,i)=>`<div class="edit-row"><input value="${esc(x)}" data-i="${i}"><span></span><button class="icon-btn ghost event-del" data-i="${i}">×</button></div>`).join('')}</div><div class="divider"></div><div class="inline-add"><input id="newEvent" placeholder="새 이벤트 분류"><button class="btn primary" id="addEvent">추가</button></div></div>
+    <div class="card"><div class="card-head"><div><h2>이벤트 세부분류</h2><p>경조사·병원·교회 등 필요에 따라 추가할 수 있습니다.</p></div></div><div class="list-editor" id="eventList">${state.settings.eventCategories.map((x,i)=>`<div class="edit-row reorder-row"><input value="${esc(x)}" data-i="${i}"><div class="reorder-actions"><button class="icon-btn ghost move-event" data-i="${i}" data-dir="-1" title="위로">↑</button><button class="icon-btn ghost move-event" data-i="${i}" data-dir="1" title="아래로">↓</button><button class="icon-btn ghost event-del" data-i="${i}">×</button></div></div>`).join('')}</div><div class="divider"></div><div class="inline-add"><input id="newEvent" placeholder="새 이벤트 분류"><button class="btn primary" id="addEvent">추가</button></div></div>
     <div class="card"><div class="card-head"><div><h2>화면 스타일</h2><p>두 기기에서 각각 원하는 스타일을 선택할 수 있습니다.</p></div></div><div class="theme-choice"><button class="theme-option ${uiTheme==='current'?'active':''}" data-theme="current"><strong>Current</strong><span>현재의 차분한 금융앱 스타일</span></button><button class="theme-option ${uiTheme==='lovable'?'active':''}" data-theme="lovable"><strong>Lovable</strong><span>그라디언트와 친근한 SaaS 스타일</span></button></div></div>
   </div>
   <div class="card section-gap">
@@ -769,12 +881,12 @@ function renderSettings(){
     <div class="grid cols-2 card-settings-grid">
       <div>
         <div class="settings-subtitle">남편카드</div>
-        <div class="list-editor" id="husbandCardList">${(state.settings.husbandCards||[]).map((x,i)=>`<div class="edit-row card-setting-row"><input value="${esc(x)}" data-card-owner="husband" data-index="${i}"><button class="icon-btn ghost delete-card-type" data-card-owner="husband" data-index="${i}" title="삭제">×</button></div>`).join('')}</div>
+        <div class="list-editor" id="husbandCardList">${(state.settings.husbandCards||[]).map((x,i)=>`<div class="edit-row card-setting-row reorder-row"><input value="${esc(x)}" data-card-owner="husband" data-index="${i}"><div class="reorder-actions"><button class="icon-btn ghost move-card-type" data-card-owner="husband" data-index="${i}" data-dir="-1">↑</button><button class="icon-btn ghost move-card-type" data-card-owner="husband" data-index="${i}" data-dir="1">↓</button><button class="icon-btn ghost delete-card-type" data-card-owner="husband" data-index="${i}">×</button></div></div>`).join('')}</div>
         <div class="inline-add section-gap-sm"><input id="newHusbandCard" placeholder="예: 삼성"><button class="btn small" id="addHusbandCard" type="button">추가</button></div>
       </div>
       <div>
         <div class="settings-subtitle">아내카드</div>
-        <div class="list-editor" id="wifeCardList">${(state.settings.wifeCards||[]).map((x,i)=>`<div class="edit-row card-setting-row"><input value="${esc(x)}" data-card-owner="wife" data-index="${i}"><button class="icon-btn ghost delete-card-type" data-card-owner="wife" data-index="${i}" title="삭제">×</button></div>`).join('')}</div>
+        <div class="list-editor" id="wifeCardList">${(state.settings.wifeCards||[]).map((x,i)=>`<div class="edit-row card-setting-row reorder-row"><input value="${esc(x)}" data-card-owner="wife" data-index="${i}"><div class="reorder-actions"><button class="icon-btn ghost move-card-type" data-card-owner="wife" data-index="${i}" data-dir="-1">↑</button><button class="icon-btn ghost move-card-type" data-card-owner="wife" data-index="${i}" data-dir="1">↓</button><button class="icon-btn ghost delete-card-type" data-card-owner="wife" data-index="${i}">×</button></div></div>`).join('')}</div>
         <div class="inline-add section-gap-sm"><input id="newWifeCard" placeholder="예: 롯데"><button class="btn small" id="addWifeCard" type="button">추가</button></div>
       </div>
     </div>
@@ -784,6 +896,12 @@ function renderSettings(){
     <div class="card"><div class="card-head"><div><h2>접속 PIN 변경</h2><p>변경하면 모든 기기에서 새 PIN을 사용합니다.</p></div></div><form id="pinChangeForm" class="form-grid"><label><span>현재 PIN</span><input id="currentPin" type="password" inputmode="numeric" maxlength="12" required></label><label><span>새 PIN</span><input id="newPin" type="password" inputmode="numeric" maxlength="12" placeholder="숫자 4~12자리" required></label><label><span>새 PIN 확인</span><input id="newPin2" type="password" inputmode="numeric" maxlength="12" required></label><div class="form-action"><button class="btn primary" type="submit">PIN 변경</button></div></form><div id="pinChangeMsg" class="helper-text"></div></div>
   </div>`;
   document.querySelectorAll('#eventList input').forEach(inp=>inp.onchange=()=>{state.settings.eventCategories[Number(inp.dataset.i)]=inp.value.trim();saveState()});
+  document.querySelectorAll('.move-event').forEach(b=>b.onclick=()=>{
+    const arr=state.settings.eventCategories,i=Number(b.dataset.i),j=i+Number(b.dataset.dir);
+    if(j<0||j>=arr.length)return;
+    [arr[i],arr[j]]=[arr[j],arr[i]];
+    formDirty=false;saveState();renderSettings();
+  });
   document.querySelectorAll('.event-del').forEach(b=>b.onclick=()=>{state.settings.eventCategories.splice(Number(b.dataset.i),1);saveState();renderSettings()});
   document.getElementById('addEvent').onclick=()=>{
     const input=document.getElementById('newEvent'),v=input.value.trim();
@@ -800,6 +918,12 @@ function renderSettings(){
       if(arr.some((x,i)=>x===v&&i!==idx)){toast('이미 등록된 카드 종류입니다.');el.value=arr[idx]||'';return;}
       arr[idx]=v;formDirty=false;saveState();toast('카드 종류를 수정했습니다.');
     };
+  });
+  document.querySelectorAll('.move-card-type').forEach(b=>b.onclick=()=>{
+    const arr=cardSettingsArray(b.dataset.cardOwner),i=Number(b.dataset.index),j=i+Number(b.dataset.dir);
+    if(j<0||j>=arr.length)return;
+    [arr[i],arr[j]]=[arr[j],arr[i]];
+    formDirty=false;saveState();renderSettings();
   });
   document.querySelectorAll('.delete-card-type').forEach(b=>b.onclick=()=>{
     const arr=cardSettingsArray(b.dataset.cardOwner),idx=Number(b.dataset.index);
