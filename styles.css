@@ -361,3 +361,41 @@ body[data-theme="lovable"] .month-picker-wrap{background:rgba(255,255,255,.78)}
     min-height:42px;
   }
 }
+
+
+/* v8 details summary widths */
+.category-summary-grid{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:12px!important}
+.category-summary-card,.event-summary-card{grid-column:auto!important;min-width:0!important;width:100%!important}
+@media(max-width:900px){.category-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+@media(max-width:520px){.category-summary-grid{grid-template-columns:1fr!important}}
+
+/* v8 classification colors */
+.pill.fixed{background:#ececef;color:#505054}
+.pill.living{background:#e8f2ff;color:#275f9e}
+.pill.food{background:#eaf7ef;color:#286744}
+.pill.event{background:#fff4de;color:#945c00}
+
+/* v8 sort segmented control */
+.details-head{align-items:center}
+.segmented{display:inline-flex;padding:3px;border:1px solid var(--line);border-radius:999px;background:rgba(118,118,128,.08);gap:2px}
+.segmented button{border:0;background:transparent;border-radius:999px;padding:7px 12px;font:inherit;font-size:11px;font-weight:650;color:var(--muted);white-space:nowrap}
+.segmented button.active{background:#fff;color:var(--ink);box-shadow:0 1px 4px rgba(0,0,0,.08)}
+@media(max-width:520px){.details-head{display:grid;grid-template-columns:1fr;gap:12px}.details-sort{justify-self:start}}
+
+/* v8 card records */
+.card-totals .metric{min-height:120px}
+.card-select-group{margin-bottom:16px}
+.field-label,.settings-subtitle{font-size:11px;color:var(--muted);font-weight:700;margin-bottom:8px}
+.owner-tabs{display:flex;width:max-content}
+.card-type-tabs{display:flex;flex-wrap:wrap;gap:8px}
+.card-type-tab{border:1px solid var(--line);border-radius:999px;padding:8px 13px;background:rgba(255,255,255,.72);font:inherit;font-size:11px;font-weight:650}
+.card-type-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.empty-inline{font-size:11px;color:var(--muted-2);padding:8px 0}
+.card-setting-row{grid-template-columns:minmax(0,1fr) 38px!important}
+.section-gap-sm{margin-top:10px}
+.card-settings-grid{align-items:start}
+@media(max-width:760px){
+ .card-totals{grid-template-columns:1fr!important}
+ .owner-tabs{width:100%}.owner-tabs button{flex:1}
+ .card-type-tabs{gap:6px}.card-type-tab{padding:8px 11px;font-size:10.5px}
+}
