@@ -189,7 +189,14 @@ function toast(msg){ const el=document.getElementById('toast'); el.textContent=m
 
 function renderNav(){
   nav.innerHTML = pages.map(([key,icon,label])=>`<button class="nav-item ${activePage===key?'active':''}" data-page="${key}"><span class="nav-icon">${icon}</span>${label}</button>`).join('');
-  nav.querySelectorAll('button').forEach(b=>b.onclick=()=>{ activePage=b.dataset.page; render(); closeMenu(); });
+  nav.querySelectorAll('button').forEach(b=>b.onclick=()=>{ formDirty=false; if(activePage==='add') clearExpenseDraft(); activePage=b.dataset.page; render(); closeMenu(); });
+}
+function bindGlobalFormDirtyGuard(){
+  app.querySelectorAll('form input,form select,form textarea').forEach(el=>{
+    el.addEventListener('focus',()=>{formDirty=true;});
+    el.addEventListener('input',()=>{formDirty=true;});
+    el.addEventListener('change',()=>{formDirty=true;});
+  });
 }
 function render(){
   renderNav();
@@ -203,13 +210,22 @@ function render(){
   if(activePage==='fixed') renderFixed();
   if(activePage==='cards') renderCards();
   if(activePage==='settings') renderSettings();
+  bindGlobalFormDirtyGuard();
 }
 
 globalMonth.onchange=()=>{ selectedMonth=globalMonth.value || currentMonth; render(); };
 
-document.getElementById('menuBtn').onclick=()=>{document.getElementById('sidebar').classList.add('open');document.getElementById('backdrop').classList.add('show')};
+document.getElementById('menuBtn').onclick=()=>{
+  document.getElementById('sidebar').classList.add('open');
+  document.getElementById('backdrop').classList.add('show');
+  document.body.classList.add('menu-open');
+};
 document.getElementById('backdrop').onclick=closeMenu;
-function closeMenu(){document.getElementById('sidebar').classList.remove('open');document.getElementById('backdrop').classList.remove('show')}
+function closeMenu(){
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('backdrop').classList.remove('show');
+  document.body.classList.remove('menu-open');
+}
 function previousMonth(month){ const [y,m]=month.split('-').map(Number); const d=new Date(y,m-2,1); return `${d.getFullYear()}-${pad(d.getMonth()+1)}`; }
 function dateInMonthLike(date, month){ const day=Math.max(1,Number(String(date||'').slice(8,10))||1); const [y,m]=month.split('-').map(Number); const last=new Date(y,m,0).getDate(); return `${month}-${pad(Math.min(day,last))}`; }
 function categoryDisplayName(cat){ return cat==='고정'?'카드고정지출':cat; }
@@ -219,6 +235,19 @@ function expenseDisplayName(x){
   if(x.category==='식비') return `식비(${x.detailCategory||'가정'})`;
   if(x.category==='이벤트'&&x.eventCategory) return `이벤트(${x.eventCategory})`;
   return x.category||'';
+}
+function expenseCreatedMs(x){
+  const c=Date.parse(String(x&&x.createdAt||''));
+  if(Number.isFinite(c)) return c;
+  const idMs=Number(String(x&&x.id||'').split('_')[0]);
+  return Number.isFinite(idMs)?idMs:0;
+}
+function sortExpensesNewestRegistered(a,b){
+  const createdDiff=expenseCreatedMs(b)-expenseCreatedMs(a);
+  if(createdDiff) return createdDiff;
+  const dateDiff=String(b.date||'').localeCompare(String(a.date||''));
+  if(dateDiff) return dateDiff;
+  return String(b.id||'').localeCompare(String(a.id||''));
 }
 async function protectedSetMonthlyLimit(month,amount,loginPin){
   const loginHash=await sha256(loginPin);
@@ -370,9 +399,11 @@ function renderAdd(){
     if(!Number.isFinite(amount) || amount<=0){ msg.textContent='사용금액을 1원 이상 입력해 주세요.'; msg.className='helper-text error'; form.elements.amount.focus(); return; }
     if(!date){ msg.textContent='사용날짜를 선택해 주세요.'; msg.className='helper-text error'; form.elements.date.focus(); return; }
     if(!method){ msg.textContent='지출방식을 선택해 주세요.'; msg.className='helper-text error'; form.elements.method.focus(); return; }
+    const createdNow=new Date().toISOString();
     state.variableExpenses.push({
       id:id(),category:parsed.category,detailCategory:parsed.detailCategory,eventCategory:parsed.eventCategory,
-      amount,date,memo:String(f.get('memo')||'').trim(),method
+      amount,date,memo:String(f.get('memo')||'').trim(),method,
+      createdAt:createdNow,updatedAt:createdNow
     });
     formDirty=false;
     clearExpenseDraft();
@@ -404,7 +435,7 @@ function renderAdd(){
 }
 
 function recentExpensesHtml(){
-  const arr=state.variableExpenses.filter(x=>monthOf(x.date)===selectedMonth).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
+  const arr=state.variableExpenses.filter(x=>monthOf(x.date)===selectedMonth).sort(sortExpensesNewestRegistered).slice(0,5);
   if(!arr.length)return `<div class="empty">아직 등록된 지출이 없습니다.</div>`;
   return `<div class="recent-list">${arr.map(x=>`<div class="recent-row"><span class="recent-memo">${esc(x.memo||expenseDisplayName(x))}</span><span class="recent-date">${esc(x.date)}</span><span class="recent-method">${esc(x.method)}</span><span class="recent-amount">${won(x.amount)}</span></div>`).join('')}</div>`;
 }
@@ -507,13 +538,29 @@ function renderExpenseEdit(expenseId){
 
 function renderIncome(){
   const list=state.incomes[selectedMonth]||[]; const total=list.reduce((a,b)=>a+Number(b.amount),0);
-  app.innerHTML=`<div class="grid cols-2"><div class="card"><div class="card-head"><div><h2>${selectedMonth} 수입 등록</h2><p>급여, 상여, 기타수입 등을 자유롭게 등록합니다.</p></div></div><form id="incomeForm"><div class="form-grid"><div class="field"><label>수입 항목</label><input name="name" placeholder="예: 남편 급여" required></div><div class="field"><label>금액</label><input name="amount" type="number" min="0" inputmode="numeric" required></div></div><div class="button-row"><button class="btn primary">추가</button></div></form></div><div class="card metric positive"><div class="metric-label">이번 달 총수입</div><div class="metric-value">${won(total)}</div><div class="metric-foot">등록된 ${list.length}개 항목 합계</div></div></div><div class="card section-gap"><div class="card-head"><h2>수입 항목</h2></div>${editorRows(list,'income')}</div>`;
-  document.getElementById('incomeForm').onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);state.incomes[selectedMonth]=[...(state.incomes[selectedMonth]||[]),{id:id(),name:f.get('name'),amount:Number(f.get('amount'))}];saveState();renderIncome()}; bindEditor('income');
+  app.innerHTML=`<div class="grid cols-2"><div class="card"><div class="card-head"><div><h2>${selectedMonth} 수입 등록</h2><p>급여, 상여, 기타수입 등을 자유롭게 등록합니다.</p></div></div><form id="incomeForm" novalidate><div class="form-grid"><div class="field"><label>수입 항목</label><input name="name" placeholder="예: 남편 급여" required></div><div class="field"><label>금액</label><input name="amount" type="number" min="0" inputmode="numeric" required></div></div><div class="button-row"><button class="btn primary">추가</button></div></form></div><div class="card metric positive"><div class="metric-label">이번 달 총수입</div><div class="metric-value">${won(total)}</div><div class="metric-foot">등록된 ${list.length}개 항목 합계</div></div></div><div class="card section-gap"><div class="card-head"><h2>수입 항목</h2></div>${editorRows(list,'income')}</div>`;
+  document.getElementById('incomeForm').onsubmit=e=>{
+    e.preventDefault();
+    const f=new FormData(e.target),name=String(f.get('name')||'').trim(),amount=Number(f.get('amount'));
+    if(!name){toast('수입 항목을 입력해 주세요.');e.target.elements.name.focus();return;}
+    if(!Number.isFinite(amount)||amount<0){toast('올바른 수입 금액을 입력해 주세요.');e.target.elements.amount.focus();return;}
+    state.incomes[selectedMonth]=[...(state.incomes[selectedMonth]||[]),{id:id(),name,amount}];
+    formDirty=false;
+    saveState();renderIncome();
+  }; bindEditor('income');
 }
 function renderFixed(){
   const list=state.fixedExpenses[selectedMonth]||[]; const total=list.reduce((a,b)=>a+Number(b.amount),0);
-  app.innerHTML=`<div class="grid cols-2"><div class="card"><div class="card-head"><div><h2>${selectedMonth} 기본지출(현금고정지출) 추가</h2><p>매달 비슷한 항목은 전월에서 한 번에 가져올 수 있습니다.</p></div><button class="btn small" id="copyFixedBtn" type="button">전월 기본지출 복사</button></div><form id="fixedForm"><div class="form-grid"><div class="field"><label>지출 항목</label><input name="name" placeholder="예: 관리비" required></div><div class="field"><label>금액</label><input name="amount" type="number" min="0" inputmode="numeric" required></div></div><div class="button-row"><button class="btn primary">추가</button></div></form></div><div class="card metric negative"><div class="metric-label">이번 달 기본지출(현금고정지출)</div><div class="metric-value">${won(total)}</div><div class="metric-foot">등록된 ${list.length}개 항목 합계</div></div></div><div class="card section-gap"><div class="card-head"><h2>기본지출(현금고정지출) 항목</h2></div>${editorRows(list,'fixed')}</div>`;
-  document.getElementById('fixedForm').onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);state.fixedExpenses[selectedMonth]=[...(state.fixedExpenses[selectedMonth]||[]),{id:id(),name:f.get('name'),amount:Number(f.get('amount'))}];saveState();renderFixed()}; const cfb=document.getElementById('copyFixedBtn'); if(cfb) cfb.onclick=()=>{const prev=previousMonth(selectedMonth),src=state.fixedExpenses[prev]||[]; if(!src.length){alert(`${prev}에 기본지출이 없습니다.`);return;} if(!confirm(`${prev} 기본지출 ${src.length}개를 가져올까요?`))return; const cur=state.fixedExpenses[selectedMonth]||[]; const add=src.filter(x=>!cur.some(c=>c.name===x.name)).map(x=>({id:id(),name:x.name,amount:Number(x.amount)||0})); state.fixedExpenses[selectedMonth]=[...cur,...add]; saveState();renderFixed();toast(`${add.length}개 항목을 복사했습니다.`);}; bindEditor('fixed');
+  app.innerHTML=`<div class="grid cols-2"><div class="card"><div class="card-head"><div><h2>${selectedMonth} 기본지출(현금고정지출) 추가</h2><p>매달 비슷한 항목은 전월에서 한 번에 가져올 수 있습니다.</p></div><button class="btn small" id="copyFixedBtn" type="button">전월 기본지출 복사</button></div><form id="fixedForm" novalidate><div class="form-grid"><div class="field"><label>지출 항목</label><input name="name" placeholder="예: 관리비" required></div><div class="field"><label>금액</label><input name="amount" type="number" min="0" inputmode="numeric" required></div></div><div class="button-row"><button class="btn primary">추가</button></div></form></div><div class="card metric negative"><div class="metric-label">이번 달 기본지출(현금고정지출)</div><div class="metric-value">${won(total)}</div><div class="metric-foot">등록된 ${list.length}개 항목 합계</div></div></div><div class="card section-gap"><div class="card-head"><h2>기본지출(현금고정지출) 항목</h2></div>${editorRows(list,'fixed')}</div>`;
+  document.getElementById('fixedForm').onsubmit=e=>{
+    e.preventDefault();
+    const f=new FormData(e.target),name=String(f.get('name')||'').trim(),amount=Number(f.get('amount'));
+    if(!name){toast('지출 항목을 입력해 주세요.');e.target.elements.name.focus();return;}
+    if(!Number.isFinite(amount)||amount<0){toast('올바른 금액을 입력해 주세요.');e.target.elements.amount.focus();return;}
+    state.fixedExpenses[selectedMonth]=[...(state.fixedExpenses[selectedMonth]||[]),{id:id(),name,amount}];
+    formDirty=false;
+    saveState();renderFixed();
+  }; const cfb=document.getElementById('copyFixedBtn'); if(cfb) cfb.onclick=()=>{const prev=previousMonth(selectedMonth),src=state.fixedExpenses[prev]||[]; if(!src.length){alert(`${prev}에 기본지출이 없습니다.`);return;} if(!confirm(`${prev} 기본지출 ${src.length}개를 가져올까요?`))return; const cur=state.fixedExpenses[selectedMonth]||[]; const add=src.filter(x=>!cur.some(c=>c.name===x.name)).map(x=>({id:id(),name:x.name,amount:Number(x.amount)||0})); state.fixedExpenses[selectedMonth]=[...cur,...add]; saveState();renderFixed();toast(`${add.length}개 항목을 복사했습니다.`);}; bindEditor('fixed');
 }
 function editorRows(list,type){
   if(!list.length)return `<div class="empty">등록된 항목이 없습니다.</div>`;
@@ -521,14 +568,34 @@ function editorRows(list,type){
 }
 function bindEditor(type){
   const arr=()=>type==='income'?state.incomes[selectedMonth]:state.fixedExpenses[selectedMonth];
-  document.querySelectorAll('.edit-row input').forEach(inp=>inp.onchange=()=>{const x=arr().find(a=>a.id===inp.dataset.id); if(x){x[inp.dataset.k]=inp.dataset.k==='amount'?Number(inp.value):inp.value;saveState();toast('수정되었습니다.')}});
+  document.querySelectorAll('.edit-row input').forEach(inp=>inp.onchange=()=>{
+    const x=arr().find(a=>a.id===inp.dataset.id); if(!x)return;
+    if(inp.dataset.k==='amount'){
+      const v=Number(inp.value);
+      if(!Number.isFinite(v)||v<0){toast('올바른 금액을 입력해 주세요.');inp.value=Number(x.amount)||0;return;}
+      x.amount=v;
+    }else{
+      const v=inp.value.trim();
+      if(!v){toast('항목명을 비워둘 수 없습니다.');inp.value=x.name||'';return;}
+      x.name=v;
+    }
+    saveState();toast('수정되었습니다.');
+  });
   document.querySelectorAll('.delete-edit').forEach(b=>b.onclick=()=>{if(type==='income')state.incomes[selectedMonth]=arr().filter(x=>x.id!==b.dataset.id);else state.fixedExpenses[selectedMonth]=arr().filter(x=>x.id!==b.dataset.id);saveState();render()});
 }
 
 function renderCards(){
   const rows=state.cardRecords.filter(x=>x.month===selectedMonth); const total=rows.reduce((a,b)=>a+Number(b.amount),0);
-  app.innerHTML=`<div class="grid cols-2"><div class="card"><div class="card-head"><div><h2>카드 사용 기록 추가</h2><p>실제 변동지출과 별개로 카드 청구·확인용으로 기록합니다.</p></div></div><form id="cardForm"><div class="form-grid"><div class="field"><label>카드</label><select name="card"><option>아내카드</option><option>남편카드</option></select></div><div class="field"><label>금액</label><input name="amount" type="number" min="0" required></div><div class="field"><label>기록명</label><input name="memo" placeholder="예: 8월 카드 사용액"></div></div><div class="button-row"><button class="btn primary">기록 추가</button></div></form></div><div class="card metric"><div class="metric-label">기록된 카드 금액</div><div class="metric-value">${won(total)}</div><div class="metric-foot">가계부 지출 합계와 자동 연동하지 않는 별도 기록</div></div></div><div class="card section-gap"><div class="card-head"><h2>${selectedMonth} 카드 기록</h2></div><div class="table-wrap">${rows.length?`<table class="table"><thead><tr><th>카드</th><th>기록명</th><th class="amount">금액</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.card)}</td><td>${esc(x.memo||'-')}</td><td class="amount"><strong>${won(x.amount)}</strong></td><td><button class="btn small danger card-del" data-id="${x.id}">삭제</button></td></tr>`).join('')}</tbody></table>`:'<div class="empty">기록이 없습니다.</div>'}</div></div>`;
-  document.getElementById('cardForm').onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);state.cardRecords.push({id:id(),month:selectedMonth,card:f.get('card'),amount:Number(f.get('amount')),memo:f.get('memo')||''});saveState();renderCards()}; document.querySelectorAll('.card-del').forEach(b=>b.onclick=()=>{state.cardRecords=state.cardRecords.filter(x=>x.id!==b.dataset.id);saveState();renderCards()});
+  app.innerHTML=`<div class="grid cols-2"><div class="card"><div class="card-head"><div><h2>카드 사용 기록 추가</h2><p>실제 변동지출과 별개로 카드 청구·확인용으로 기록합니다.</p></div></div><form id="cardForm" novalidate><div class="form-grid"><div class="field"><label>카드</label><select name="card"><option>아내카드</option><option>남편카드</option></select></div><div class="field"><label>금액</label><input name="amount" type="number" min="0" required></div><div class="field"><label>기록명</label><input name="memo" placeholder="예: 8월 카드 사용액"></div></div><div class="button-row"><button class="btn primary">기록 추가</button></div></form></div><div class="card metric"><div class="metric-label">기록된 카드 금액</div><div class="metric-value">${won(total)}</div><div class="metric-foot">가계부 지출 합계와 자동 연동하지 않는 별도 기록</div></div></div><div class="card section-gap"><div class="card-head"><h2>${selectedMonth} 카드 기록</h2></div><div class="table-wrap">${rows.length?`<table class="table"><thead><tr><th>카드</th><th>기록명</th><th class="amount">금액</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.card)}</td><td>${esc(x.memo||'-')}</td><td class="amount"><strong>${won(x.amount)}</strong></td><td><button class="btn small danger card-del" data-id="${x.id}">삭제</button></td></tr>`).join('')}</tbody></table>`:'<div class="empty">기록이 없습니다.</div>'}</div></div>`;
+  document.getElementById('cardForm').onsubmit=e=>{
+    e.preventDefault();
+    const f=new FormData(e.target),card=String(f.get('card')||'').trim(),amount=Number(f.get('amount')),memo=String(f.get('memo')||'').trim();
+    if(!card){toast('카드를 선택해 주세요.');return;}
+    if(!Number.isFinite(amount)||amount<0){toast('올바른 카드 금액을 입력해 주세요.');e.target.elements.amount.focus();return;}
+    state.cardRecords.push({id:id(),month:selectedMonth,card,amount,memo});
+    formDirty=false;
+    saveState();renderCards();
+  }; document.querySelectorAll('.card-del').forEach(b=>b.onclick=()=>{state.cardRecords=state.cardRecords.filter(x=>x.id!==b.dataset.id);saveState();renderCards()});
 }
 
 function renderSummary(){
@@ -554,7 +621,12 @@ function renderSettings(){
   </div>`;
   document.querySelectorAll('#eventList input').forEach(inp=>inp.onchange=()=>{state.settings.eventCategories[Number(inp.dataset.i)]=inp.value.trim();saveState()});
   document.querySelectorAll('.event-del').forEach(b=>b.onclick=()=>{state.settings.eventCategories.splice(Number(b.dataset.i),1);saveState();renderSettings()});
-  document.getElementById('addEvent').onclick=()=>{const v=document.getElementById('newEvent').value.trim();if(v){state.settings.eventCategories.push(v);saveState();renderSettings()}};
+  document.getElementById('addEvent').onclick=()=>{
+    const input=document.getElementById('newEvent'),v=input.value.trim();
+    if(!v){toast('이벤트 항목명을 입력해 주세요.');input.focus();return;}
+    if(state.settings.eventCategories.includes(v)){toast('이미 있는 이벤트 항목입니다.');input.select();return;}
+    state.settings.eventCategories.push(v);saveState();renderSettings();
+  };
   document.querySelectorAll('.theme-option').forEach(b=>b.onclick=()=>{applyTheme(b.dataset.theme);renderSettings();toast('화면 스타일을 변경했습니다.');});
   const pinForm=document.getElementById('pinChangeForm'); if(pinForm) pinForm.onsubmit=async(e)=>{e.preventDefault();const current=document.getElementById('currentPin').value,np=document.getElementById('newPin').value,np2=document.getElementById('newPin2').value,msg=document.getElementById('pinChangeMsg'); if(np!==np2){msg.textContent='새 PIN 두 값이 서로 다릅니다.';msg.className='helper-text error';return;} try{msg.textContent='변경 중…';await changeSharedPin(current,np);msg.textContent='PIN이 변경되었습니다.';msg.className='helper-text success';pinForm.reset();}catch(err){msg.textContent=err.message||'PIN 변경 실패';msg.className='helper-text error';}};
 }
