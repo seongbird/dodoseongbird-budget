@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#f5f5f7" />
   <title>우리집 가계부</title>
-  <link rel="stylesheet" href="styles.css?v=20260824m" />
+  <link rel="stylesheet" href="styles.css?v=20260825a" />
 </head>
 <body class="locked pin-pending">
   <div class="app-shell">
@@ -32,7 +32,9 @@
           <p id="pageSubtitle">지출을 빠르게 기록하고 이번 달 잔액을 확인하세요.</p>
         </div>
         <div class="top-actions">
+          <button class="month-step-btn" id="prevMonthBtn" type="button" aria-label="이전 달" title="이전 달">‹</button>
           <button class="current-month-btn" id="currentMonthBtn" type="button" aria-label="이번 달로 이동" title="이번 달">이번달</button>
+          <button class="month-step-btn" id="nextMonthBtn" type="button" aria-label="다음 달" title="다음 달">›</button>
           <label class="month-picker-wrap">
             <span>기준월</span>
             <input id="globalMonth" type="month" />
@@ -60,6 +62,6 @@
   <div id="toast" class="toast"></div>
   <div id="backdrop" class="backdrop"></div>
   <script src="config.js"></script>
-  <script src="app.js?v=20260824m"></script>
+  <script src="app.js?v=20260825a"></script>
 </body>
 </html>
