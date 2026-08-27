@@ -26,6 +26,7 @@ let detailsSortMode = 'latest';
 const API_URL = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.API_URL) || '';
 let PIN_HASH = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.PIN_HASH) || '';
 const DEFAULT_PIN_HASH = PIN_HASH;
+const APP_VERSION = 'v13.0 · 2026-08-27';
 const PIN_SESSION_KEY = 'coupleBudget_pin_ok_v1';
 const PIN_CACHE_KEY = 'coupleBudget_pin_hash_cache_v1';
 const cachedPinHash = localStorage.getItem(PIN_CACHE_KEY) || '';
@@ -166,7 +167,7 @@ function remoteLoad(){
     const sc=document.createElement('script');
     const timer=setTimeout(()=>{ cleanup(); reject(new Error('연결 시간 초과')); },12000);
     const cleanup=()=>{ clearTimeout(timer); try{delete window[cb]}catch{}; sc.remove(); };
-    window[cb]=(res)=>{ cleanup(); if(res && res.ok && res.data){ state=mergeStateNoLoss(state,res.data); localStorage.setItem(STORAGE_KEY,JSON.stringify(state)); setSyncStatus('Google Sheets 동기화됨'); render(); resolve(true); } else { reject(new Error((res&&res.error)||'불러오기 실패')); } };
+    window[cb]=(res)=>{ cleanup(); if(res && res.ok && res.data){ state=mergeStateNoLoss(state,res.data); localStorage.setItem(STORAGE_KEY,JSON.stringify(state)); setSyncStatus('Google Sheets 동기화됨'); if(!formDirty)render(); resolve(true); } else { reject(new Error((res&&res.error)||'불러오기 실패')); } };
     sc.onerror=()=>{ cleanup(); reject(new Error('연결 실패')); };
     sc.src=API_URL+'?action=getState&callback='+encodeURIComponent(cb)+'&_='+Date.now();
     document.head.appendChild(sc);
@@ -291,6 +292,32 @@ function mergeStateNoLoss(localState,remoteState){
 }
 function saveState(){ saveLocalOnly(); remoteSave(); }
 function won(n){ return `${Math.round(Number(n)||0).toLocaleString('ko-KR')}원`; }
+function parseAmount(v){
+  const s=String(v??'').replace(/[,\s]/g,'');
+  if(s==='')return NaN;
+  const n=Number(s);
+  return Number.isFinite(n)?n:NaN;
+}
+function commaNumber(v){
+  const s=String(v??'').replace(/[^\d]/g,'');
+  if(!s)return '';
+  return Number(s).toLocaleString('ko-KR');
+}
+function bindMoneyInputs(){
+  app.querySelectorAll('input[name="amount"],input[name="reimbursedAmount"],input[data-k="amount"]').forEach(el=>{
+    if(el.dataset.moneyBound==='1')return;
+    el.dataset.moneyBound='1';
+    el.type='text';el.inputMode='numeric';el.autocomplete='off';
+    if(el.value!=='')el.value=commaNumber(el.value);
+    el.addEventListener('input',()=>{
+      const caretFromEnd=el.value.length-(el.selectionStart||el.value.length);
+      el.value=commaNumber(el.value);
+      const p=Math.max(0,el.value.length-caretFromEnd);
+      try{el.setSelectionRange(p,p)}catch{}
+    });
+    el.addEventListener('blur',()=>{if(el.value!=='')el.value=commaNumber(el.value);});
+  });
+}
 function monthOf(date){ return String(date||'').slice(0,7); }
 function id(){ return `${Date.now()}_${Math.random().toString(36).slice(2,8)}`; }
 function esc(s=''){ return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
@@ -301,6 +328,7 @@ function renderNav(){
   nav.querySelectorAll('button').forEach(b=>b.onclick=()=>{ formDirty=false; if(activePage==='add') clearExpenseDraft(); activePage=b.dataset.page; render(); closeMenu(); });
 }
 function bindGlobalFormDirtyGuard(){
+  bindMoneyInputs();
   app.querySelectorAll('form input,form select,form textarea').forEach(el=>{
     el.addEventListener('focus',()=>{formDirty=true;});
     el.addEventListener('input',()=>{formDirty=true;});
@@ -550,8 +578,8 @@ function renderAdd(){
   form.onsubmit=e=>{
     e.preventDefault();
     const f=new FormData(form);
-    const amount=Number(f.get('amount'));
-    const reimbursedAmount=Number(f.get('reimbursedAmount')||0);
+    const amount=parseAmount(f.get('amount'));
+    const reimbursedAmount=(String(f.get('reimbursedAmount')||'').trim()===''?0:parseAmount(f.get('reimbursedAmount')));
     const date=String(f.get('date')||'').trim();
     const method=String(f.get('method')||'').trim();
     const choice=String(f.get('categoryChoice')||defaultValue).trim();
@@ -630,7 +658,7 @@ function averageCompareMarkup(current, average){
 }
 function renderDetails(){
   let rows=state.variableExpenses.filter(x=>monthOf(x.date)===selectedMonth);
-  rows.sort(detailsSortMode==='category'?sortExpensesByCategory:sortExpensesByUsageDateLatest);
+  rows.sort(detailsSortMode==='category'?sortExpensesByCategory:(detailsSortMode==='registered'?sortExpensesNewestRegistered:sortExpensesByUsageDateLatest));
   const total=rows.reduce((a,b)=>a+effectiveExpenseAmount(b),0); const year=selectedMonth.slice(0,4);
   const groupCard=(title,category,details)=>{
     const amount=rows.filter(x=>x.category===category).reduce((a,b)=>a+effectiveExpenseAmount(b),0);
@@ -651,7 +679,7 @@ function renderDetails(){
   app.innerHTML=`
     <div class="grid cols-3"><div class="card metric"><div class="metric-label">총 변동지출</div><div class="metric-value">${won(total)}</div></div><div class="card metric"><div class="metric-label">등록 건수</div><div class="metric-value">${rows.length}건</div></div><div class="card metric"><div class="metric-label">일 평균 지출</div><div class="metric-value">${won(rows.length?total/new Date(+selectedMonth.slice(0,4),+selectedMonth.slice(5,7),0).getDate():0)}</div></div></div>
     <div class="card section-gap"><div class="card-head"><div><h2>대분류별 지출</h2><p>${year}년 실제 기록이 있는 월 기준 월평균과 비교합니다.</p></div></div><div class="category-summary-grid">${cards}</div></div>
-    <div class="card section-gap"><div class="card-head details-head"><div><h2>${selectedMonth} 세부 내역</h2><p>최신순은 사용날짜 기준 최신순, 분류별은 각 분류 안에서 사용날짜가 오래된 순입니다.</p></div><div class="segmented details-sort"><button type="button" class="${detailsSortMode==='latest'?'active':''}" data-sort="latest">최신순</button><button type="button" class="${detailsSortMode==='category'?'active':''}" data-sort="category">분류별</button></div></div><div class="table-wrap">${rows.length?`<table class="table"><thead><tr><th>날짜</th><th>분류</th><th>사용내역</th><th>지출방식</th><th class="amount">금액</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.date)}</td><td><span class="pill ${categoryPillClass(x)}">${esc(expenseDisplayName(x))}</span></td><td>${esc(x.memo||'-')}</td><td>${esc(x.method)}</td><td class="amount"><strong>${won(effectiveExpenseAmount(x))}</strong>${reimbursementAmount(x)>0?`<div class="muted tiny-note">결제 ${won(x.amount)} · 회수 ${won(reimbursementAmount(x))}</div>`:''}</td><td><div class="row-actions"><button class="btn small edit-exp" data-id="${x.id}">수정</button><button class="btn small danger delete-exp" data-id="${x.id}">삭제</button></div></td></tr>`).join('')}</tbody></table>`:`<div class="empty">${selectedMonth}에 등록된 내역이 없습니다.</div>`}</div></div>`;
+    <div class="card section-gap"><div class="card-head details-head"><div><h2>${selectedMonth} 세부 내역</h2><p>사용날짜·분류·실제 등록시간 기준으로 정렬할 수 있습니다.</p></div><div class="segmented details-sort"><button type="button" class="${detailsSortMode==='latest'?'active':''}" data-sort="latest">사용일 최신</button><button type="button" class="${detailsSortMode==='category'?'active':''}" data-sort="category">분류별</button><button type="button" class="${detailsSortMode==='registered'?'active':''}" data-sort="registered">등록 최신</button></div></div><div class="table-wrap">${rows.length?`<table class="table"><thead><tr><th>날짜</th><th>분류</th><th>사용내역</th><th>지출방식</th><th class="amount">금액</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.date)}</td><td><span class="pill ${categoryPillClass(x)}">${esc(expenseDisplayName(x))}</span></td><td>${esc(x.memo||'-')}</td><td>${esc(x.method)}</td><td class="amount"><strong>${won(effectiveExpenseAmount(x))}</strong>${reimbursementAmount(x)>0?`<div class="muted tiny-note">결제 ${won(x.amount)} · 회수 ${won(reimbursementAmount(x))}</div>`:''}</td><td><div class="row-actions"><button class="btn small edit-exp" data-id="${x.id}">수정</button><button class="btn small danger delete-exp" data-id="${x.id}">삭제</button></div></td></tr>`).join('')}</tbody></table>`:`<div class="empty">${selectedMonth}에 등록된 내역이 없습니다.</div>`}</div></div>`;
   document.querySelectorAll('.details-sort button').forEach(b=>b.onclick=()=>{detailsSortMode=b.dataset.sort||'latest';renderDetails();});
   document.querySelectorAll('.delete-exp').forEach(b=>b.onclick=()=>{if(confirm('이 지출 내역을 삭제할까요?')){const rid=b.dataset.id;state.variableExpenses=state.variableExpenses.filter(x=>x.id!==rid);saveLocalOnly();renderDetails();remoteDeleteRecord('variableExpenses',rid).catch(console.error);remoteSave()}});
   document.querySelectorAll('.edit-exp').forEach(b=>b.onclick=()=>renderExpenseEdit(b.dataset.id));
@@ -680,8 +708,8 @@ function renderExpenseEdit(expenseId){
   document.getElementById('editExpenseForm').onsubmit=e=>{
     e.preventDefault();
     const f=new FormData(e.target);
-    const amount=Number(f.get('amount'));
-    const reimbursedAmount=Number(f.get('reimbursedAmount')||0);
+    const amount=parseAmount(f.get('amount'));
+    const reimbursedAmount=(String(f.get('reimbursedAmount')||'').trim()===''?0:parseAmount(f.get('reimbursedAmount')));
     const date=String(f.get('date')||'').trim();
     const method=String(f.get('method')||'').trim();
     const parsed=parseExpenseCategory(String(f.get('categoryChoice')||''));
@@ -721,23 +749,21 @@ function renderSummary(){
 const INCOME_CATEGORIES=['남편','아내','자녀','공통'];
 const FIXED_CATEGORIES=['주거','보험','그 외','헌금'];
 
-function categoryMonthlyAverage(groupKey,category,year){
+function activeDataMonths(groupKey,year){
   const grouped=state[groupKey]||{};
-  let total=0;
-  for(let m=1;m<=12;m++){
-    const month=`${year}-${pad(m)}`;
-    total+=(grouped[month]||[]).filter(x=>(x.category||'')===category).reduce((a,b)=>a+Number(b.amount||0),0);
-  }
-  return total/12;
+  return Array.from({length:12},(_,i)=>`${year}-${pad(i+1)}`).filter(month=>(grouped[month]||[]).length>0);
+}
+function categoryMonthlyAverage(groupKey,category,year){
+  const grouped=state[groupKey]||{},months=activeDataMonths(groupKey,year);
+  if(!months.length)return 0;
+  const total=months.reduce((sum,month)=>sum+(grouped[month]||[]).filter(x=>(x.category||'')===category).reduce((a,b)=>a+Number(b.amount||0),0),0);
+  return total/months.length;
 }
 function totalMonthlyAverage(groupKey,year){
-  const grouped=state[groupKey]||{};
-  let total=0;
-  for(let m=1;m<=12;m++){
-    const month=`${year}-${pad(m)}`;
-    total+=(grouped[month]||[]).reduce((a,b)=>a+Number(b.amount||0),0);
-  }
-  return total/12;
+  const grouped=state[groupKey]||{},months=activeDataMonths(groupKey,year);
+  if(!months.length)return 0;
+  const total=months.reduce((sum,month)=>sum+(grouped[month]||[]).reduce((a,b)=>a+Number(b.amount||0),0),0);
+  return total/months.length;
 }
 function avgBadge(value,avg,positiveGood){
   if(avg===0) return `<span class="avg-badge neutral">연평균 데이터 없음</span>`;
@@ -773,7 +799,7 @@ function renderIncome(){
     </div>
     <div class="card metric positive"><div class="metric-label">이번 달 총수입</div><div class="metric-value">${won(total)}</div>${avgBadge(total,totalAvg,true)}<div class="metric-foot">연간 월평균 ${won(totalAvg)} · ${list.length}개 항목</div></div>
   </div>
-  <div class="card section-gap"><div class="card-head"><div><h2>분류별 수입</h2><p>현재 월 합계와 ${year}년 월평균을 비교합니다.</p></div></div>${categorySummaryCards(list,INCOME_CATEGORIES,'incomes',true)}</div>
+  <div class="card section-gap"><div class="card-head"><div><h2>분류별 수입</h2><p>현재 월 합계와 ${year}년 데이터가 입력된 월만 사용한 월평균을 비교합니다.</p></div></div>${categorySummaryCards(list,INCOME_CATEGORIES,'incomes',true)}</div>
   <div class="card section-gap"><div class="card-head"><h2>수입 항목</h2></div>${editorRows(list,'income')}</div>`;
 
   const form=document.getElementById('incomeForm');
@@ -783,7 +809,7 @@ function renderIncome(){
   });
   form.onsubmit=e=>{
     e.preventDefault();
-    const f=new FormData(e.target),category=String(f.get('category')||defaultCat),name=String(f.get('name')||'').trim(),amount=Number(f.get('amount'));
+    const f=new FormData(e.target),category=String(f.get('category')||defaultCat),name=String(f.get('name')||'').trim(),amount=parseAmount(f.get('amount'));
     if(!name){toast('수입 항목을 입력해 주세요.');e.target.elements.name.focus();return;}
     if(!Number.isFinite(amount)||amount<0){toast('올바른 수입 금액을 입력해 주세요.');e.target.elements.amount.focus();return;}
     const now=new Date().toISOString();
@@ -807,7 +833,7 @@ function renderFixed(){
     </div>
     <div class="card metric negative"><div class="metric-label">이번 달 기본지출</div><div class="metric-value">${won(total)}</div>${avgBadge(total,totalAvg,false)}<div class="metric-foot">연간 월평균 ${won(totalAvg)} · ${list.length}개 항목</div></div>
   </div>
-  <div class="card section-gap"><div class="card-head"><div><h2>분류별 기본지출</h2><p>현재 월 합계와 ${year}년 월평균을 비교합니다.</p></div></div>${categorySummaryCards(list,FIXED_CATEGORIES,'fixedExpenses',false)}</div>
+  <div class="card section-gap"><div class="card-head"><div><h2>분류별 기본지출</h2><p>현재 월 합계와 ${year}년 데이터가 입력된 월만 사용한 월평균을 비교합니다.</p></div></div>${categorySummaryCards(list,FIXED_CATEGORIES,'fixedExpenses',false)}</div>
   <div class="card section-gap"><div class="card-head"><h2>기본지출(현금고정지출) 항목</h2></div>${editorRows(list,'fixed')}</div>`;
 
   const form=document.getElementById('fixedForm');
@@ -817,7 +843,7 @@ function renderFixed(){
   });
   form.onsubmit=e=>{
     e.preventDefault();
-    const f=new FormData(e.target),category=String(f.get('category')||defaultCat),name=String(f.get('name')||'').trim(),amount=Number(f.get('amount'));
+    const f=new FormData(e.target),category=String(f.get('category')||defaultCat),name=String(f.get('name')||'').trim(),amount=parseAmount(f.get('amount'));
     if(!name){toast('지출 항목을 입력해 주세요.');e.target.elements.name.focus();return;}
     if(!Number.isFinite(amount)||amount<0){toast('올바른 금액을 입력해 주세요.');e.target.elements.amount.focus();return;}
     const now=new Date().toISOString();
@@ -844,7 +870,7 @@ function bindEditor(type){
   document.querySelectorAll('.edit-row input').forEach(inp=>inp.onchange=()=>{
     const x=arr().find(a=>a.id===inp.dataset.id); if(!x)return;
     if(inp.dataset.k==='amount'){
-      const v=Number(inp.value);
+      const v=parseAmount(inp.value);
       if(!Number.isFinite(v)||v<0){toast('올바른 금액을 입력해 주세요.');inp.value=Number(x.amount)||0;return;}
       x.amount=v;
     }else{
@@ -942,7 +968,7 @@ function renderCards(){
   document.getElementById('cardForm').onsubmit=e=>{
     e.preventDefault();
     const f=new FormData(e.target);
-    const owner=String(f.get('owner')||'').trim(),cardType=String(f.get('cardType')||'').trim(),amount=Number(f.get('amount')),memo=String(f.get('memo')||'').trim();
+    const owner=String(f.get('owner')||'').trim(),cardType=String(f.get('cardType')||'').trim(),amount=parseAmount(f.get('amount')),memo=String(f.get('memo')||'').trim();
     if(!owner){toast('남편카드 또는 아내카드를 선택해 주세요.');return;}
     if(!cardType){toast('카드 종류를 선택해 주세요.');return;}
     if(!Number.isFinite(amount)||amount<0){toast('올바른 카드 금액을 입력해 주세요.');e.target.elements.amount.focus();return;}
@@ -1004,7 +1030,7 @@ function renderCardRecordEdit(recordId){
   document.getElementById('cancelCardRecordEdit').onclick=()=>renderCards();
   document.getElementById('cardRecordEditForm').onsubmit=e=>{
     e.preventDefault();
-    const f=new FormData(e.target),newOwner=String(f.get('owner')||''),newType=String(f.get('cardType')||''),amount=Number(f.get('amount')),memo=String(f.get('memo')||'').trim();
+    const f=new FormData(e.target),newOwner=String(f.get('owner')||''),newType=String(f.get('cardType')||''),amount=parseAmount(f.get('amount')),memo=String(f.get('memo')||'').trim();
     if(!newOwner||!newType){toast('사용자와 카드 종류를 선택해 주세요.');return;}
     if(!Number.isFinite(amount)||amount<0){toast('올바른 카드 금액을 입력해 주세요.');return;}
     Object.assign(x,{owner:newOwner,cardType:newType,card:newOwner+'카드',amount,memo,updatedAt:new Date().toISOString()});

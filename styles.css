@@ -547,3 +547,57 @@ html,body{max-width:100%;overflow-x:hidden}
   .category-summary-grid{grid-template-columns:1fr 1fr}
   .avg-badge{white-space:normal;line-height:1.25}
 }
+
+/* v13 visible version */
+.sync-meta{display:grid;gap:2px;min-width:0}
+.app-version,.pin-version{font-size:9px;color:var(--muted-2);font-variant-numeric:tabular-nums}
+.pin-version{margin-top:7px;text-align:center}
+
+/* v13 compact month navigation */
+.month-step-btn{
+  width:25px!important;height:25px!important;min-width:25px!important;
+  border-radius:50%!important;font-size:16px!important;
+  box-shadow:none!important;border-color:rgba(0,0,0,.08)!important;
+}
+.current-month-btn{padding:6px 8px!important;font-size:9px!important}
+.top-actions{gap:5px!important}
+
+/* Money fields stay visually consistent after switching to text input */
+input[data-money-bound="1"]{font-variant-numeric:tabular-nums}
+
+/* Three sort choices without forcing page width */
+.details-sort{max-width:100%;overflow-x:auto;scrollbar-width:none}
+.details-sort::-webkit-scrollbar{display:none}
+.details-sort button{flex:0 0 auto;padding-left:10px;padding-right:10px}
+
+/* Mobile topbar: menu button and title share the exact same first-row alignment. */
+@media(max-width:760px){
+  .topbar{
+    display:grid!important;
+    grid-template-columns:36px minmax(0,1fr)!important;
+    grid-template-rows:36px auto!important;
+    column-gap:9px!important;row-gap:7px!important;
+    align-items:center!important;
+    min-height:0!important;
+    padding-top:10px!important;padding-bottom:9px!important;
+  }
+  #menuBtn{
+    width:36px!important;height:36px!important;
+    align-self:center!important;margin:0!important;
+  }
+  .topbar>div:nth-child(2){
+    min-width:0!important;display:flex!important;align-items:center!important;height:36px!important;
+  }
+  .topbar h1{
+    font-size:20px!important;line-height:36px!important;margin:0!important;
+    white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;
+  }
+  .top-actions{
+    grid-column:1/-1!important;grid-row:2!important;
+    justify-content:flex-end!important;min-width:0!important;
+  }
+  .month-step-btn{width:23px!important;height:23px!important;min-width:23px!important;font-size:15px!important}
+  .month-picker-wrap{min-width:0!important;padding:5px 7px!important}
+  .month-picker-wrap input{max-width:108px!important}
+  .details-sort button{font-size:10px!important;padding:7px 8px!important}
+}
