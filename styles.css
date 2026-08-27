@@ -601,3 +601,34 @@ input[data-money-bound="1"]{font-variant-numeric:tabular-nums}
   .month-picker-wrap input{max-width:108px!important}
   .details-sort button{font-size:10px!important;padding:7px 8px!important}
 }
+
+/* v14 compact record editor */
+.simple-record-list{display:grid}
+.simple-record-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:11px 2px;border-bottom:1px solid var(--line);min-width:0}
+.simple-record-row:last-child{border-bottom:0}
+.simple-record-info{min-width:0}.simple-record-info strong{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.simple-record-amount{font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.simple-record-actions{display:flex;gap:5px}
+.income-pill{background:#eaf7ef;color:#286744}.fixed-pill{background:#ececef;color:#505054}
+@media(max-width:600px){
+ .simple-record-row{grid-template-columns:auto minmax(0,1fr) auto}
+ .simple-record-actions{grid-column:1/-1;justify-content:flex-end}
+}
+
+/* v14 brand settings */
+.brand-settings-card input{min-width:0}
+
+/* v14 month controls: one-line desktop, dedicated compact second row mobile */
+.top-actions{flex-wrap:nowrap!important}
+@media(max-width:760px){
+  .topbar{grid-template-rows:36px 34px!important}
+  .top-actions{
+    grid-column:1/-1!important;grid-row:2!important;
+    justify-content:center!important;align-items:center!important;
+    height:34px!important;gap:4px!important;
+  }
+  .month-picker-wrap{height:30px!important;padding:4px 7px!important}
+  .month-picker-wrap input{font-size:11px!important;max-width:112px!important}
+  .month-step-btn{width:22px!important;height:22px!important;min-width:22px!important;font-size:14px!important}
+  .current-month-btn{height:24px!important;padding:4px 7px!important;font-size:8.5px!important}
+}

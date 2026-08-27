@@ -10,7 +10,10 @@ const defaultState = {
     eventCategories: ['경조사','병원','교회','여가','가구가전'],
     methods: ['현금','아내카드','남편카드'],
     husbandCards: ['현대','국민','신한'],
-    wifeCards: ['국민','현대','BC']
+    wifeCards: ['국민','현대','BC'],
+    brandIcon: '₩',
+    brandTitle: '우리집 가계부',
+    brandSubtitle: 'Couple Budget'
   },
   variableExpenses: [],
   incomes: {},
@@ -26,7 +29,7 @@ let detailsSortMode = 'latest';
 const API_URL = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.API_URL) || '';
 let PIN_HASH = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.PIN_HASH) || '';
 const DEFAULT_PIN_HASH = PIN_HASH;
-const APP_VERSION = 'v13.0 · 2026-08-27';
+const APP_VERSION = 'v14.0 · 2026-08-28';
 const PIN_SESSION_KEY = 'coupleBudget_pin_ok_v1';
 const PIN_CACHE_KEY = 'coupleBudget_pin_hash_cache_v1';
 const cachedPinHash = localStorage.getItem(PIN_CACHE_KEY) || '';
@@ -196,13 +199,13 @@ async function remoteDeleteRecord(entity,idValue){
 }
 
 const pages = [
-  ['add','＋','변동지출 등록','지출을 빠르게 기록하고 이번 달 잔액을 확인하세요.'],
-  ['details','≡','변동지출 내역','등록된 지출을 날짜·분류·결제수단별로 확인하세요.'],
+  ['add','＋','지출 등록','지출을 빠르게 기록하고 이번 달 잔액을 확인하세요.'],
+  ['details','≡','변동지출','등록된 지출을 날짜·분류·결제수단별로 확인하세요.'],
+  ['fixed','⌂','기본지출','현금으로 나가는 월별 고정지출을 관리하세요.'],
+  ['income','↗','월별 수입','월별 수입 항목을 등록하고 관리하세요.'],
   ['summary','▦','연간 요약','한 해의 수입과 지출 흐름을 간단히 확인하세요.'],
-  ['income','↗','월별 수입','월별 수입 항목을 등록하고 수정하세요.'],
-  ['fixed','⌂','기본지출(현금고정지출)','월별 현금 고정지출 항목과 금액을 관리하세요.'],
   ['cards','▤','카드 사용 기록','카드별 청구·사용 금액을 별도로 기록하세요.'],
-  ['settings','⚙','항목 설정','이벤트 세부분류 등 가계부 항목을 관리하세요.']
+  ['settings','⚙','설정','가계부 항목과 화면 표시를 관리하세요.']
 ];
 
 const app = document.getElementById('app');
@@ -240,8 +243,11 @@ function normalizeStateModel(input){
   s.settings.variableCategories=['고정','생활비','식비','이벤트'];
   s.settings.husbandCards=Array.isArray(s.settings.husbandCards)&&s.settings.husbandCards.length?s.settings.husbandCards:[...defaultState.settings.husbandCards];
   s.settings.wifeCards=Array.isArray(s.settings.wifeCards)&&s.settings.wifeCards.length?s.settings.wifeCards:[...defaultState.settings.wifeCards];
+  s.incomes=normalizeGroupedMonths(s.incomes||{});
+  s.fixedExpenses=normalizeGroupedMonths(s.fixedExpenses||{});
   s.cardRecords=(s.cardRecords||[]).map(x=>{
     const o={...x};
+    o.month=normalizeMonthKey(o.month);
     if(!o.owner){
       if(o.card==='남편카드') o.owner='남편';
       else if(o.card==='아내카드') o.owner='아내';
@@ -283,7 +289,12 @@ function mergeStateNoLoss(localState,remoteState){
   const local=normalizeStateModel({...structuredClone(defaultState),...(localState||{})});
   remote.variableExpenses=mergeRecordArrays(local.variableExpenses,remote.variableExpenses);
   remote.cardRecords=mergeRecordArrays(local.cardRecords,remote.cardRecords);
-  const mg=(a,b)=>{const out={},ms=new Set([...Object.keys(a||{}),...Object.keys(b||{})]);ms.forEach(m=>out[m]=mergeRecordArrays((a||{})[m]||[],(b||{})[m]||[]));return out;};
+  const mg=(a,b)=>{
+    a=normalizeGroupedMonths(a||{}); b=normalizeGroupedMonths(b||{});
+    const out={},ms=new Set([...Object.keys(a),...Object.keys(b)]);
+    ms.forEach(m=>out[m]=mergeRecordArrays(a[m]||[],b[m]||[]).map(r=>({...r,month:m})));
+    return out;
+  };
   remote.incomes=mg(local.incomes,remote.incomes);
   remote.fixedExpenses=mg(local.fixedExpenses,remote.fixedExpenses);
   remote.monthlyLimits={...(remote.monthlyLimits||{}),...(local.monthlyLimits||{})};
@@ -319,10 +330,37 @@ function bindMoneyInputs(){
   });
 }
 function monthOf(date){ return String(date||'').slice(0,7); }
+function normalizeMonthKey(v){
+  const s=String(v||'').trim();
+  const m=s.match(/^(\d{4})-(\d{2})/);
+  return m?`${m[1]}-${m[2]}`:s.slice(0,7);
+}
+function normalizeGroupedMonths(grouped){
+  const out={};
+  Object.entries(grouped||{}).forEach(([key,rows])=>{
+    const mk=normalizeMonthKey(key);
+    if(!mk)return;
+    out[mk]=[...(out[mk]||[]),...(rows||[])].map(r=>({...r,month:mk}));
+  });
+  return out;
+}
 function id(){ return `${Date.now()}_${Math.random().toString(36).slice(2,8)}`; }
 function esc(s=''){ return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
 function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),1800); }
 
+function applyBrand(){
+  const icon=String(state.settings.brandIcon||'₩').slice(0,3);
+  const title=String(state.settings.brandTitle||'우리집 가계부');
+  const sub=String(state.settings.brandSubtitle||'Couple Budget');
+  document.querySelectorAll('.brand-mark').forEach(el=>{if(!el.classList.contains('pin-brand')||el.classList.contains('pin-brand'))el.textContent=icon;});
+  const brand=document.querySelector('.brand');
+  if(brand){
+    const strong=brand.querySelector('strong'),span=brand.querySelector('span');
+    if(strong)strong.textContent=title;if(span)span.textContent=sub;
+  }
+  const pinTitle=document.querySelector('.pin-card h2'); if(pinTitle)pinTitle.textContent=title;
+  document.title=title;
+}
 function renderNav(){
   nav.innerHTML = pages.map(([key,icon,label])=>`<button class="nav-item ${activePage===key?'active':''}" data-page="${key}"><span class="nav-icon">${icon}</span>${label}</button>`).join('');
   nav.querySelectorAll('button').forEach(b=>b.onclick=()=>{ formDirty=false; if(activePage==='add') clearExpenseDraft(); activePage=b.dataset.page; render(); closeMenu(); });
@@ -336,6 +374,7 @@ function bindGlobalFormDirtyGuard(){
   });
 }
 function render(){
+  applyBrand();
   renderNav();
   const meta = pages.find(p=>p[0]===activePage);
   pageTitle.textContent = meta[2]; pageSubtitle.textContent = meta[3];
@@ -650,11 +689,11 @@ function yearMonthlyAverage(year, category, detailCategory='', eventCategory='')
 }
 function averageCompareMarkup(current, average){
   current=Number(current)||0; average=Number(average)||0;
-  if(average<=0) return `<span class="avg-neutral">평균 없음</span>`;
+  if(average<=0) return `<span class="avg-neutral">기록월 없음</span>`;
   const pct=((current-average)/average)*100;
-  if(Math.abs(pct)<1) return `<span class="avg-neutral">평균 ≈</span>`;
-  if(pct>0) return `<span class="avg-high">평균 +${Math.abs(pct).toFixed(0)}%</span>`;
-  return `<span class="avg-low">평균 -${Math.abs(pct).toFixed(0)}%</span>`;
+  if(Math.abs(pct)<1) return `<span class="avg-neutral">기록월 ≈</span>`;
+  if(pct>0) return `<span class="avg-high">기록월 +${Math.abs(pct).toFixed(0)}%</span>`;
+  return `<span class="avg-low">기록월 -${Math.abs(pct).toFixed(0)}%</span>`;
 }
 function renderDetails(){
   let rows=state.variableExpenses.filter(x=>monthOf(x.date)===selectedMonth);
@@ -738,7 +777,7 @@ function renderSummary(){
   const variable=stats.reduce((a,b)=>a+b.variable,0);
   app.innerHTML=`<div class="grid cols-3">
     <div class="card metric positive"><div class="metric-label">${year} 수입</div><div class="metric-value">${won(income)}</div></div>
-    <div class="card metric"><div class="metric-label">${year} 기본지출(현금고정)</div><div class="metric-value">${won(fixed)}</div></div>
+    <div class="card metric"><div class="metric-label">${year} 기본지출</div><div class="metric-value">${won(fixed)}</div></div>
     <div class="card metric negative"><div class="metric-label">${year} 변동지출</div><div class="metric-value">${won(variable)}</div></div>
   </div>
   <div class="card section-gap"><div class="card-head"><div><h2>${year} 월별 흐름</h2><p>각 월의 수입과 지출을 간단히 비교합니다.</p></div></div>
@@ -766,18 +805,18 @@ function totalMonthlyAverage(groupKey,year){
   return total/months.length;
 }
 function avgBadge(value,avg,positiveGood){
-  if(avg===0) return `<span class="avg-badge neutral">연평균 데이터 없음</span>`;
+  if(avg===0) return `<span class="avg-badge neutral">기록월 없음</span>`;
   const diff=value-avg, pct=Math.round(Math.abs(diff)/avg*100);
   const higher=diff>=0;
   const good=positiveGood?higher:!higher;
-  return `<span class="avg-badge ${good?'good':'warn'}">연평균보다 ${pct}% ${higher?'높음':'낮음'}</span>`;
+  return `<span class="avg-badge ${good?'good':'warn'}">기록월 평균보다 ${pct}% ${higher?'높음':'낮음'}</span>`;
 }
 function categorySummaryCards(list,categories,groupKey,positiveGood){
   const year=selectedMonth.slice(0,4);
   return `<div class="category-summary-grid">${categories.map(c=>{
     const v=list.filter(x=>(x.category||'')===c).reduce((a,b)=>a+Number(b.amount||0),0);
     const avg=categoryMonthlyAverage(groupKey,c,year);
-    return `<div class="category-summary-item"><span>${c}</span><strong>${won(v)}</strong>${avgBadge(v,avg,positiveGood)}<small>월평균 ${won(avg)}</small></div>`;
+    return `<div class="category-summary-item"><span>${c}</span><strong>${won(v)}</strong>${avgBadge(v,avg,positiveGood)}<small>기록월 평균 ${won(avg)}</small></div>`;
   }).join('')}</div>`;
 }
 function categoryTabs(name,categories,selected){
@@ -797,7 +836,7 @@ function renderIncome(){
         <div class="button-row"><button class="btn primary">추가</button></div>
       </form>
     </div>
-    <div class="card metric positive"><div class="metric-label">이번 달 총수입</div><div class="metric-value">${won(total)}</div>${avgBadge(total,totalAvg,true)}<div class="metric-foot">연간 월평균 ${won(totalAvg)} · ${list.length}개 항목</div></div>
+    <div class="card metric positive"><div class="metric-label">이번 달 총수입</div><div class="metric-value">${won(total)}</div>${avgBadge(total,totalAvg,true)}<div class="metric-foot">기록월 평균 ${won(totalAvg)} · ${list.length}개 항목</div></div>
   </div>
   <div class="card section-gap"><div class="card-head"><div><h2>분류별 수입</h2><p>현재 월 합계와 ${year}년 데이터가 입력된 월만 사용한 월평균을 비교합니다.</p></div></div>${categorySummaryCards(list,INCOME_CATEGORIES,'incomes',true)}</div>
   <div class="card section-gap"><div class="card-head"><h2>수입 항목</h2></div>${editorRows(list,'income')}</div>`;
@@ -824,17 +863,17 @@ function renderFixed(){
   const year=selectedMonth.slice(0,4),totalAvg=totalMonthlyAverage('fixedExpenses',year);
   const defaultCat=FIXED_CATEGORIES[0];
   app.innerHTML=`<div class="grid cols-2">
-    <div class="card"><div class="card-head"><div><h2>${selectedMonth} 기본지출(현금고정지출) 추가</h2><p>대분류를 선택하고 현금 고정지출을 등록합니다.</p></div><button class="btn small" id="copyFixedBtn" type="button">전월 기본지출 복사</button></div>
+    <div class="card"><div class="card-head"><div><h2>${selectedMonth} 기본지출 추가</h2><p>현금으로 나가는 고정지출입니다. 대분류를 선택해 등록하세요.</p></div><button class="btn small" id="copyFixedBtn" type="button">전월 기본지출 복사</button></div>
       <form id="fixedForm" novalidate>
         <div class="field full"><label>대분류</label>${categoryTabs('category',FIXED_CATEGORIES,defaultCat)}</div>
         <div class="form-grid section-gap"><div class="field"><label>지출 항목</label><input name="name" placeholder="예: 관리비, 보험료" required></div><div class="field"><label>금액</label><input name="amount" type="number" min="0" inputmode="numeric" required></div></div>
         <div class="button-row"><button class="btn primary">추가</button></div>
       </form>
     </div>
-    <div class="card metric negative"><div class="metric-label">이번 달 기본지출</div><div class="metric-value">${won(total)}</div>${avgBadge(total,totalAvg,false)}<div class="metric-foot">연간 월평균 ${won(totalAvg)} · ${list.length}개 항목</div></div>
+    <div class="card metric negative"><div class="metric-label">이번 달 기본지출</div><div class="metric-value">${won(total)}</div>${avgBadge(total,totalAvg,false)}<div class="metric-foot">기록월 평균 ${won(totalAvg)} · ${list.length}개 항목</div></div>
   </div>
   <div class="card section-gap"><div class="card-head"><div><h2>분류별 기본지출</h2><p>현재 월 합계와 ${year}년 데이터가 입력된 월만 사용한 월평균을 비교합니다.</p></div></div>${categorySummaryCards(list,FIXED_CATEGORIES,'fixedExpenses',false)}</div>
-  <div class="card section-gap"><div class="card-head"><h2>기본지출(현금고정지출) 항목</h2></div>${editorRows(list,'fixed')}</div>`;
+  <div class="card section-gap"><div class="card-head"><h2>기본지출 항목</h2></div>${editorRows(list,'fixed')}</div>`;
 
   const form=document.getElementById('fixedForm');
   form.querySelectorAll('.category-entry-tabs button').forEach(b=>b.onclick=()=>{
@@ -863,26 +902,58 @@ function renderFixed(){
 }
 function editorRows(list,type){
   if(!list.length)return `<div class="empty">등록된 항목이 없습니다.</div>`;
-  return `<div class="list-editor">${list.map(x=>`<div class="edit-row"><input value="${esc(x.name)}" data-id="${x.id}" data-k="name"><input type="number" value="${Number(x.amount)}" data-id="${x.id}" data-k="amount"><button class="icon-btn ghost delete-edit" data-id="${x.id}" title="삭제">×</button></div>`).join('')}</div>`;
+  return `<div class="simple-record-list">${list.map(x=>`<div class="simple-record-row">
+    <span class="pill ${type==='income'?'income-pill':'fixed-pill'}">${esc(x.category||'미분류')}</span>
+    <div class="simple-record-info"><strong>${esc(x.name)}</strong></div>
+    <strong class="simple-record-amount">${won(x.amount)}</strong>
+    <div class="simple-record-actions"><button class="btn small edit-simple" data-id="${x.id}" data-type="${type}" type="button">수정</button><button class="btn small danger delete-edit" data-id="${x.id}" type="button">삭제</button></div>
+  </div>`).join('')}</div>`;
 }
 function bindEditor(type){
-  const arr=()=>type==='income'?state.incomes[selectedMonth]:state.fixedExpenses[selectedMonth];
-  document.querySelectorAll('.edit-row input').forEach(inp=>inp.onchange=()=>{
-    const x=arr().find(a=>a.id===inp.dataset.id); if(!x)return;
-    if(inp.dataset.k==='amount'){
-      const v=parseAmount(inp.value);
-      if(!Number.isFinite(v)||v<0){toast('올바른 금액을 입력해 주세요.');inp.value=Number(x.amount)||0;return;}
-      x.amount=v;
-    }else{
-      const v=inp.value.trim();
-      if(!v){toast('항목명을 비워둘 수 없습니다.');inp.value=x.name||'';return;}
-      x.name=v;
-    }
-    saveState();toast('수정되었습니다.');
+  document.querySelectorAll('.edit-simple').forEach(b=>b.onclick=()=>renderSimpleRecordEdit(type,b.dataset.id));
+  document.querySelectorAll('.delete-edit').forEach(b=>b.onclick=()=>{
+    if(!confirm('이 항목을 삭제할까요?'))return;
+    const rid=b.dataset.id;
+    if(type==='income')state.incomes[selectedMonth]=(state.incomes[selectedMonth]||[]).filter(x=>x.id!==rid);
+    else state.fixedExpenses[selectedMonth]=(state.fixedExpenses[selectedMonth]||[]).filter(x=>x.id!==rid);
+    saveLocalOnly();
+    remoteDeleteRecord(type==='income'?'incomes':'fixedExpenses',rid).catch(console.error);
+    remoteSave();
+    type==='income'?renderIncome():renderFixed();
   });
-  document.querySelectorAll('.delete-edit').forEach(b=>b.onclick=()=>{const rid=b.dataset.id;if(type==='income')state.incomes[selectedMonth]=arr().filter(x=>x.id!==rid);else state.fixedExpenses[selectedMonth]=arr().filter(x=>x.id!==rid);saveLocalOnly();render();remoteDeleteRecord(type==='income'?'incomes':'fixedExpenses',rid).catch(console.error);remoteSave()});
 }
-
+function renderSimpleRecordEdit(type,recordId){
+  const list=type==='income'?(state.incomes[selectedMonth]||[]):(state.fixedExpenses[selectedMonth]||[]);
+  const x=list.find(r=>r.id===recordId);
+  if(!x){type==='income'?renderIncome():renderFixed();return;}
+  const cats=type==='income'?INCOME_CATEGORIES:FIXED_CATEGORIES;
+  const title=type==='income'?'수입 항목 수정':'기본지출 항목 수정';
+  app.innerHTML=`<div class="card simple-edit-card"><div class="card-head"><div><h2>${title}</h2><p>대분류, 항목명, 금액을 모두 변경할 수 있습니다.</p></div></div>
+    <form id="simpleRecordEditForm" novalidate>
+      <div class="field full"><label>대분류</label>${categoryTabs('category',cats,x.category||cats[0])}</div>
+      <div class="form-grid section-gap">
+        <div class="field"><label>항목</label><input name="name" value="${esc(x.name||'')}"></div>
+        <div class="field"><label>금액</label><input name="amount" inputmode="numeric" value="${Number(x.amount)||0}"></div>
+      </div>
+      <div class="button-row"><button class="btn" id="cancelSimpleEdit" type="button">취소</button><button class="btn primary" type="submit">수정 저장</button></div>
+    </form>
+  </div>`;
+  const form=document.getElementById('simpleRecordEditForm');
+  bindMoneyInputs();
+  form.querySelectorAll('.category-entry-tabs button').forEach(b=>b.onclick=()=>{
+    form.elements.category.value=b.dataset.category;
+    form.querySelectorAll('.category-entry-tabs button').forEach(q=>q.classList.toggle('active',q===b));
+  });
+  document.getElementById('cancelSimpleEdit').onclick=()=>type==='income'?renderIncome():renderFixed();
+  form.onsubmit=e=>{
+    e.preventDefault();
+    const f=new FormData(form),category=String(f.get('category')||cats[0]),name=String(f.get('name')||'').trim(),amount=parseAmount(f.get('amount'));
+    if(!name||!Number.isFinite(amount)||amount<0){toast('항목명과 금액을 확인해 주세요.');return;}
+    Object.assign(x,{category,name,amount,updatedAt:new Date().toISOString()});
+    formDirty=false;saveState();toast('수정했습니다.');
+    type==='income'?renderIncome():renderFixed();
+  };
+}
 async function remoteUpsertCardRecord(record){
   if(!apiConfigured()) return false;
   const payload=btoa(unescape(encodeURIComponent(JSON.stringify(record))));
@@ -902,15 +973,19 @@ function renderCards(){
   const total=rows.reduce((a,b)=>a+Number(b.amount||0),0);
   const husbandTotal=rows.filter(x=>x.owner==='남편'||x.card==='남편카드').reduce((a,b)=>a+Number(b.amount||0),0);
   const wifeTotal=rows.filter(x=>x.owner==='아내'||x.card==='아내카드').reduce((a,b)=>a+Number(b.amount||0),0);
+  const cardYear=selectedMonth.slice(0,4);
+  const totalCardAvg=cardMonthlyAverage(cardYear);
+  const husbandCardAvg=cardMonthlyAverage(cardYear,x=>x.owner==='남편'||x.card==='남편카드');
+  const wifeCardAvg=cardMonthlyAverage(cardYear,x=>x.owner==='아내'||x.card==='아내카드');
   const husbandCards=state.settings.husbandCards||[];
   const wifeCards=state.settings.wifeCards||[];
   const defaultOwner='남편';
   const defaultType=husbandCards[0]||'';
   app.innerHTML=`
     <div class="grid cols-3 card-totals">
-      <div class="card metric"><div class="metric-label">카드값 총합</div><div class="metric-value">${won(total)}</div></div>
-      <div class="card metric"><div class="metric-label">남편카드값 총합</div><div class="metric-value">${won(husbandTotal)}</div></div>
-      <div class="card metric"><div class="metric-label">아내카드값 총합</div><div class="metric-value">${won(wifeTotal)}</div></div>
+      <div class="card metric"><div class="metric-label">카드값 총합</div><div class="metric-value">${won(total)}</div>${avgBadge(total,totalCardAvg,false)}<div class="metric-foot">기록월 평균 ${won(totalCardAvg)}</div></div>
+      <div class="card metric"><div class="metric-label">남편카드값 총합</div><div class="metric-value">${won(husbandTotal)}</div>${avgBadge(husbandTotal,husbandCardAvg,false)}<div class="metric-foot">기록월 평균 ${won(husbandCardAvg)}</div></div>
+      <div class="card metric"><div class="metric-label">아내카드값 총합</div><div class="metric-value">${won(wifeTotal)}</div>${avgBadge(wifeTotal,wifeCardAvg,false)}<div class="metric-foot">기록월 평균 ${won(wifeCardAvg)}</div></div>
     </div>
     <div class="grid cols-2 section-gap">
       <div class="card">
@@ -1043,6 +1118,13 @@ function renderCardRecordEdit(recordId){
 function renderSettings(){
   app.innerHTML=`<div class="grid cols-2">
     <div class="card"><div class="card-head"><div><h2>이벤트 세부분류</h2><p>경조사·병원·교회 등 필요에 따라 추가할 수 있습니다.</p></div></div><div class="list-editor" id="eventList">${state.settings.eventCategories.map((x,i)=>`<div class="edit-row reorder-row"><input value="${esc(x)}" data-i="${i}"><div class="reorder-actions"><button class="icon-btn ghost move-event" data-i="${i}" data-dir="-1" title="위로">↑</button><button class="icon-btn ghost move-event" data-i="${i}" data-dir="1" title="아래로">↓</button><button class="icon-btn ghost event-del" data-i="${i}">×</button></div></div>`).join('')}</div><div class="divider"></div><div class="inline-add"><input id="newEvent" placeholder="새 이벤트 분류"><button class="btn primary" id="addEvent">추가</button></div></div>
+    <div class="card brand-settings-card"><div class="card-head"><div><h2>가계부 이름</h2><p>메뉴와 PIN 화면에 표시할 아이콘과 이름을 변경합니다.</p></div></div>
+      <form id="brandSettingsForm" class="form-grid">
+        <label><span>아이콘</span><input name="brandIcon" maxlength="3" value="${esc(state.settings.brandIcon||'₩')}"></label>
+        <label><span>메인 이름</span><input name="brandTitle" value="${esc(state.settings.brandTitle||'우리집 가계부')}"></label>
+        <label class="field full"><span>보조 이름</span><input name="brandSubtitle" value="${esc(state.settings.brandSubtitle||'Couple Budget')}"></label>
+        <div class="form-action"><button class="btn primary" type="submit">이름 저장</button></div>
+      </form></div>
     <div class="card"><div class="card-head"><div><h2>화면 스타일</h2><p>두 기기에서 각각 원하는 스타일을 선택할 수 있습니다.</p></div></div><div class="theme-choice"><button class="theme-option ${uiTheme==='current'?'active':''}" data-theme="current"><strong>Current</strong><span>현재의 차분한 금융앱 스타일</span></button><button class="theme-option ${uiTheme==='lovable'?'active':''}" data-theme="lovable"><strong>Lovable</strong><span>그라디언트와 친근한 SaaS 스타일</span></button></div></div>
   </div>
   <div class="card section-gap">
@@ -1106,6 +1188,15 @@ function renderSettings(){
   }
   document.getElementById('addHusbandCard').onclick=()=>addCardType('husband','newHusbandCard');
   document.getElementById('addWifeCard').onclick=()=>addCardType('wife','newWifeCard');
+  const brandForm=document.getElementById('brandSettingsForm');
+  if(brandForm)brandForm.onsubmit=e=>{
+    e.preventDefault();
+    const f=new FormData(brandForm);
+    state.settings.brandIcon=String(f.get('brandIcon')||'₩').trim()||'₩';
+    state.settings.brandTitle=String(f.get('brandTitle')||'우리집 가계부').trim()||'우리집 가계부';
+    state.settings.brandSubtitle=String(f.get('brandSubtitle')||'Couple Budget').trim();
+    formDirty=false;saveState();applyBrand();toast('가계부 이름을 저장했습니다.');
+  };
   document.querySelectorAll('.theme-option').forEach(b=>b.onclick=()=>{applyTheme(b.dataset.theme);renderSettings();toast('화면 스타일을 변경했습니다.');});
   const pinForm=document.getElementById('pinChangeForm'); if(pinForm) pinForm.onsubmit=async(e)=>{e.preventDefault();const current=document.getElementById('currentPin').value,np=document.getElementById('newPin').value,np2=document.getElementById('newPin2').value,msg=document.getElementById('pinChangeMsg'); if(np!==np2){msg.textContent='새 PIN 두 값이 서로 다릅니다.';msg.className='helper-text error';return;} try{msg.textContent='변경 중…';await changeSharedPin(current,np);msg.textContent='PIN이 변경되었습니다.';msg.className='helper-text success';pinForm.reset();}catch(err){msg.textContent=err.message||'PIN 변경 실패';msg.className='helper-text error';}};
 }
