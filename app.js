@@ -64,7 +64,7 @@ let expandedSummaryCategory = '';
 const API_URL = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.API_URL) || '';
 let PIN_HASH = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.PIN_HASH) || '';
 const DEFAULT_PIN_HASH = PIN_HASH;
-const APP_VERSION = 'v21.0 · 2026-08-28';
+const APP_VERSION = 'v23.0 · 2026-08-28';
 const PIN_SESSION_KEY = 'coupleBudget_pin_ok_v1';
 const PIN_CACHE_KEY = 'coupleBudget_pin_hash_cache_v1';
 const cachedPinHash = localStorage.getItem(PIN_CACHE_KEY) || '';
@@ -478,6 +478,7 @@ function render(){
   if(activePage==='cards') renderCards();
   if(activePage==='settings') renderSettings();
   bindGlobalFormDirtyGuard();
+  bindCategoryTrendTooltips();
 }
 
 globalMonth.onchange=()=>{ selectedMonth=globalMonth.value || currentMonth; formDirty=false; render(); updateCurrentMonthButton(); };
@@ -1126,12 +1127,21 @@ function avgBadge(value,avg,positiveGood){
   const good=positiveGood?higher:!higher;
   return `<span class="avg-badge ${good?'good':'warn'}">기록월 평균보다 ${pct}% ${higher?'높음':'낮음'}</span>`;
 }
+function categoryColorIndex(groupKey,category){
+  const cats=groupKey==='incomes'?incomeCategories():(groupKey==='fixedExpenses'?fixedCategories():[]);
+  const idx=cats.indexOf(category);
+  return (idx>=0?idx:0)%8;
+}
+function categoryColorClass(groupKey,category){
+  return `category-color-${categoryColorIndex(groupKey,category)}`;
+}
+
 function categorySummaryCards(list,categories,groupKey,positiveGood){
   const year=selectedMonth.slice(0,4);
   return `<div class="category-summary-grid auto-category-grid category-count-${Math.min(8,Math.max(1,categories.length))}">${categories.map(c=>{
     const v=list.filter(x=>(x.category||'')===c).reduce((a,b)=>a+Number(b.amount||0),0);
     const avg=categoryMonthlyAverage(groupKey,c,year);
-    return `<div class="category-summary-item"><span>${c}</span><strong>${won(v)}</strong>${avgBadge(v,avg,positiveGood)}<small>기록월 평균 ${won(avg)}</small></div>`;
+    return `<div class="category-summary-item ${categoryColorClass(groupKey,c)}"><span>${c}</span><strong>${won(v)}</strong>${avgBadge(v,avg,positiveGood)}<small>기록월 평균 ${won(avg)}</small></div>`;
   }).join('')}</div>`;
 }
 function categoryTabs(name,categories,selected){
@@ -1162,22 +1172,68 @@ function categoryTrendChart(domain,categories,year,currentMonth,title){
   const W=900,H=280,left=40,right=24,top=24,bottom=36,plotH=H-top-bottom,step=(W-left-right)/11;
   const selectedIndex=Math.max(0,Math.min(11,Number(currentMonth.slice(5,7))-1));
   const selectedX=left+selectedIndex*step;
+  const bandW=Math.min(step*.72,64);
+  const bandMin=6;
+  const bandMax=W-bandW-6;
+  const bandX=Math.min(Math.max(bandMin,selectedX-bandW/2),bandMax);
   const paths=series.map(s=>{
     const pts=s.values.map((v,i)=>({x:left+i*step,y:top+plotH-(v/max)*plotH,v,i}));
     const d=pts.map((p,i)=>`${i?'L':'M'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
     return `<path d="${d}" class="category-trend-line trend-series-${s.si%8}"/>
-      ${pts.map(p=>`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${p.i===selectedIndex?5.2:3.2}" class="category-trend-point trend-series-${s.si%8} ${p.i===selectedIndex?'selected':''}"><title>${s.label} ${p.i+1}월 ${won(p.v)}</title></circle>`).join('')}`;
+      ${pts.map(p=>`<g class="category-trend-hit" data-tooltip-category="${esc(s.label)}" data-tooltip-month="${p.i+1}월" data-tooltip-value="${won(p.v)}">
+        <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="11" class="category-trend-hit-area"/>
+        <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${p.i===selectedIndex?5.2:3.2}" class="category-trend-point trend-series-${s.si%8} ${p.i===selectedIndex?'selected':''}"/>
+      </g>`).join('')}`;
   }).join('');
   return `<div class="card category-trend-card">
     <div class="card-head"><div><h2>${esc(title)}</h2><p>1~12월 대분류별 월간 추이 · 선택월은 강조 표시</p></div></div>
     <div class="category-trend-legend">${series.map(s=>`<span class="trend-series-${s.si%8}"><i></i>${esc(s.label)}</span>`).join('')}</div>
+    <div class="category-trend-tooltip" role="status" aria-live="polite" hidden></div>
     <svg class="category-trend-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(title)}">
-      <rect x="${Math.max(left,selectedX-step*.38).toFixed(1)}" y="${top}" width="${(step*.76).toFixed(1)}" height="${plotH}" rx="8" class="selected-month-band"/>
+      <rect x="${bandX.toFixed(1)}" y="${top}" width="${bandW.toFixed(1)}" height="${plotH}" rx="8" class="selected-month-band"/>
       <line x1="${left}" y1="${top+plotH}" x2="${W-right}" y2="${top+plotH}" class="axis"/>
       ${paths}
       ${months.map((m,i)=>`<text x="${(left+i*step).toFixed(1)}" y="${H-10}" text-anchor="middle" class="${i===selectedIndex?'selected-month-label':''}">${i+1}월</text>`).join('')}
     </svg>
   </div>`;
+}
+
+function bindCategoryTrendTooltips(){
+  document.querySelectorAll('.category-trend-card').forEach(card=>{
+    const tooltip=card.querySelector('.category-trend-tooltip');
+    if(!tooltip)return;
+    const hits=card.querySelectorAll('.category-trend-hit');
+
+    const show=(hit,clientX,clientY)=>{
+      const category=hit.dataset.tooltipCategory||'';
+      const month=hit.dataset.tooltipMonth||'';
+      const value=hit.dataset.tooltipValue||'';
+      tooltip.innerHTML=`<strong>${esc(category)}</strong><span>${esc(month)}</span><b>${esc(value)}</b>`;
+      tooltip.hidden=false;
+
+      const rect=card.getBoundingClientRect();
+      const x=Math.min(Math.max(10,clientX-rect.left+12),Math.max(10,rect.width-tooltip.offsetWidth-10));
+      const y=Math.max(8,clientY-rect.top-tooltip.offsetHeight-12);
+      tooltip.style.left=`${x}px`;
+      tooltip.style.top=`${y}px`;
+    };
+    const hide=()=>{tooltip.hidden=true;};
+
+    hits.forEach(hit=>{
+      hit.addEventListener('pointerenter',e=>show(hit,e.clientX,e.clientY));
+      hit.addEventListener('pointermove',e=>show(hit,e.clientX,e.clientY));
+      hit.addEventListener('pointerleave',e=>{
+        if(e.pointerType!=='touch')hide();
+      });
+      hit.addEventListener('click',e=>{
+        e.stopPropagation();
+        show(hit,e.clientX,e.clientY);
+      });
+    });
+    card.addEventListener('pointerleave',e=>{
+      if(e.pointerType!=='touch')hide();
+    });
+  });
 }
 
 function renderIncome(){
@@ -1273,7 +1329,7 @@ function renderFixed(){
 }
 function editorRows(list,type){
   if(!list.length)return `<div class="empty">등록된 항목이 없습니다.</div>`;
-  return `<div class="simple-record-list">${list.map(x=>`<div class="simple-record-row">
+  return `<div class="simple-record-list">${list.map(x=>`<div class="simple-record-row ${categoryColorClass(type==='income'?'incomes':'fixedExpenses',x.category||'미분류')}">
     <span class="pill ${type==='income'?'income-pill':'fixed-pill'}">${esc(x.category||'미분류')}</span>
     <div class="simple-record-info"><strong>${esc(x.name)}</strong></div>
     <strong class="simple-record-amount">${won(x.amount)}</strong>

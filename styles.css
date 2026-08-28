@@ -1229,3 +1229,91 @@ input[data-money-bound="1"]{font-variant-numeric:tabular-nums}
     grid-template-columns:1fr!important;
   }
 }
+
+/* v22 chart hover/tap tooltip */
+.category-trend-card{
+  position:relative;
+}
+.category-trend-tooltip{
+  position:absolute;
+  z-index:20;
+  pointer-events:none;
+  min-width:118px;
+  max-width:190px;
+  padding:9px 10px;
+  border-radius:11px;
+  background:rgba(28,28,30,.94);
+  color:#fff;
+  box-shadow:0 8px 24px rgba(0,0,0,.18);
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:3px 10px;
+  font-size:10px;
+  line-height:1.35;
+  backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px);
+}
+.category-trend-tooltip[hidden]{display:none!important}
+.category-trend-tooltip strong{
+  grid-column:1/-1;
+  font-size:10px;
+  font-weight:700;
+}
+.category-trend-tooltip span{
+  color:rgba(255,255,255,.68);
+}
+.category-trend-tooltip b{
+  font-size:11px;
+  font-weight:750;
+  text-align:right;
+  white-space:nowrap;
+}
+.category-trend-hit{
+  cursor:crosshair;
+}
+.category-trend-hit-area{
+  fill:transparent;
+  stroke:none;
+  pointer-events:all;
+}
+@media(max-width:760px){
+  .category-trend-hit{cursor:pointer}
+  .category-trend-tooltip{
+    min-width:108px;
+    font-size:9.5px;
+  }
+}
+
+/* v23 selected-month band: fully visible at chart edges */
+.selected-month-band{
+  stroke:rgba(118,118,128,.14);
+  stroke-width:1;
+}
+
+/* v23 category color system for income/fixed */
+.category-color-0{--cat:#657a96;--cat-bg:rgba(101,122,150,.10)}
+.category-color-1{--cat:#7d8f72;--cat-bg:rgba(125,143,114,.11)}
+.category-color-2{--cat:#a17c67;--cat-bg:rgba(161,124,103,.11)}
+.category-color-3{--cat:#82769c;--cat-bg:rgba(130,118,156,.10)}
+.category-color-4{--cat:#6f9292;--cat-bg:rgba(111,146,146,.10)}
+.category-color-5{--cat:#9a8460;--cat-bg:rgba(154,132,96,.11)}
+.category-color-6{--cat:#7f7f87;--cat-bg:rgba(127,127,135,.10)}
+.category-color-7{--cat:#8e6f7c;--cat-bg:rgba(142,111,124,.10)}
+
+.category-summary-item[class*="category-color-"]{
+  background:var(--cat-bg)!important;
+  box-shadow:inset 0 0 0 1px rgba(118,118,128,.08);
+}
+.category-summary-item[class*="category-color-"]>span{
+  color:var(--cat)!important;
+  font-weight:730!important;
+}
+.simple-record-row[class*="category-color-"]{
+  border-left:3px solid var(--cat);
+  background:linear-gradient(90deg,var(--cat-bg),rgba(255,255,255,0) 46%);
+}
+.simple-record-row[class*="category-color-"] .pill{
+  background:var(--cat-bg)!important;
+  color:var(--cat)!important;
+  border-color:transparent!important;
+}
