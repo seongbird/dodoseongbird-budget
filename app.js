@@ -35,7 +35,7 @@ let expandedSummaryCategory = '';
 const API_URL = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.API_URL) || '';
 let PIN_HASH = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.PIN_HASH) || '';
 const DEFAULT_PIN_HASH = PIN_HASH;
-const APP_VERSION = 'v17.0 · 2026-08-28';
+const APP_VERSION = 'v18.0 · 2026-08-28';
 const PIN_SESSION_KEY = 'coupleBudget_pin_ok_v1';
 const PIN_CACHE_KEY = 'coupleBudget_pin_hash_cache_v1';
 const cachedPinHash = localStorage.getItem(PIN_CACHE_KEY) || '';
@@ -329,6 +329,19 @@ function mergeStateNoLoss(localState,remoteState){
 }
 function saveState(){ saveLocalOnly(); remoteSave(); }
 function won(n){ return `${Math.round(Number(n)||0).toLocaleString('ko-KR')}원`; }
+function compactWon(n){
+  n=Number(n)||0;
+  const a=Math.abs(n);
+  if(a>=100000000){
+    const v=n/100000000;
+    return `${v.toFixed(a>=1000000000?1:2).replace(/\.?0+$/,'')}억`;
+  }
+  if(a>=10000){
+    const v=n/10000;
+    return `${v.toFixed(a>=100000?0:1).replace(/\.?0+$/,'')}만`;
+  }
+  return Math.round(n).toLocaleString('ko-KR');
+}
 function parseAmount(v){
   const s=String(v??'').replace(/[,\s]/g,'');
   if(s==='')return NaN;
@@ -828,7 +841,7 @@ function summaryNetSvg(stats){
 function compactCategoryBreakdown(obj){
   const entries=Object.entries(obj||{}).filter(([,v])=>Number(v)!==0).sort((a,b)=>b[1]-a[1]);
   if(!entries.length)return `<div class="empty-inline">기록 없음</div>`;
-  return `<div class="summary-category-list">${entries.map(([k,v])=>`<div><span>${esc(k)}</span><strong>${won(v)}</strong></div>`).join('')}</div>`;
+  return `<div class="summary-category-list">${entries.map(([k,v])=>`<div><span>${esc(k)}</span><strong class="summary-category-amount">${won(v)}</strong></div>`).join('')}</div>`;
 }
 function annualDomainMeta(domain){
   if(domain==='income') return {label:'수입',positiveGood:true};
@@ -887,21 +900,28 @@ function annualCategoryCompareMarkup(stats,positiveGood){
 function annualCategoryTrendSvg(stats){
   const vals=stats.series.map(x=>x.value);
   const max=Math.max(1,...vals);
-  const W=720,H=150,left=24,right=10,top=12,bottom=28;
-  const plotH=H-top-bottom,step=(W-left-right)/12,barW=Math.max(10,step*.48);
-  return `<svg class="annual-category-trend" viewBox="0 0 ${W} ${H}" role="img" aria-label="12개월 월별 추이">
+  const W=960,H=230,left=38,right=30,top=44,bottom=36;
+  const plotH=H-top-bottom;
+  const step=(W-left-right)/11;
+  const points=stats.series.map((p,i)=>{
+    const x=left+i*step;
+    const y=top+plotH-(p.value/max)*plotH;
+    return {x,y,value:p.value,month:i+1};
+  });
+  const path=points.map((p,i)=>`${i?'L':'M'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+  return `<svg class="annual-category-trend" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="12개월 월별 추이">
     <line x1="${left}" y1="${top+plotH}" x2="${W-right}" y2="${top+plotH}" class="axis"/>
-    ${stats.series.map((p,i)=>{
-      const h=(p.value/max)*plotH;
-      const x=left+i*step+(step-barW)/2;
-      const y=top+plotH-h;
-      return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="3" class="annual-cat-bar"><title>${i+1}월 ${won(p.value)}</title></rect>
-      <text x="${(x+barW/2).toFixed(1)}" y="${H-8}" text-anchor="middle">${i+1}</text>`;
-    }).join('')}
+    <path d="${path}" class="annual-cat-line"/>
+    ${points.map(p=>`<g class="annual-cat-point">
+      <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="5"/>
+      <text class="annual-cat-value" x="${p.x.toFixed(1)}" y="${Math.max(16,p.y-12).toFixed(1)}" text-anchor="middle">${p.value?compactWon(p.value):'0'}</text>
+      <text class="annual-cat-month" x="${p.x.toFixed(1)}" y="${H-9}" text-anchor="middle">${p.month}월</text>
+      <title>${p.month}월 ${won(p.value)}</title>
+    </g>`).join('')}
   </svg>`;
 }
 function annualCategoryMonthGrid(stats){
-  return `<div class="annual-category-month-grid">${stats.series.map((p,i)=>`<div class="${p.value===0?'zero':''}"><span>${i+1}월</span><strong>${won(p.value)}</strong></div>`).join('')}</div>`;
+  return `<div class="annual-category-month-grid">${stats.series.map((p,i)=>`<div class="${p.value===0?'zero':''}"><span>${i+1}월</span><strong title="${won(p.value)}">${compactWon(p.value)}</strong></div>`).join('')}</div>`;
 }
 function annualCategoryAccordion(domain,year){
   const meta=annualDomainMeta(domain);
@@ -913,7 +933,7 @@ function annualCategoryAccordion(domain,year){
     return `<div class="annual-category-item ${open?'open':''}">
       <button type="button" class="annual-category-toggle" data-key="${esc(key)}" aria-expanded="${open}">
         <span class="annual-category-name">${esc(category)}</span>
-        <span class="annual-category-year-total">${year} 합계 <strong>${won(stats.total)}</strong></span>
+        <span class="annual-category-year-total"><span>${year} 합계</span><strong>${won(stats.total)}</strong></span>
         ${annualCategoryCompareMarkup(stats,meta.positiveGood)}
         <span class="chevron">${open?'⌃':'⌄'}</span>
       </button>
@@ -972,9 +992,9 @@ function renderSummary(){
           <span class="chevron">${opened?'⌃':'⌄'}</span>
         </button>
         ${opened?`<div class="annual-month-detail">
-          <div><h3>수입</h3>${compactCategoryBreakdown(inc)}</div>
-          <div><div class="summary-block-head"><h3>기본지출</h3><strong>${won(s.fixed)}</strong></div>${compactCategoryBreakdown(fix)}</div>
-          <div><div class="summary-block-head"><h3>변동지출</h3><strong>${won(s.variable)}</strong></div>${compactCategoryBreakdown(vari)}</div>
+          <div class="summary-detail-block income-block"><div class="summary-block-head"><h3>수입</h3><strong>${won(s.income)}</strong></div>${compactCategoryBreakdown(inc)}</div>
+          <div class="summary-detail-block fixed-block"><div class="summary-block-head"><h3>기본지출</h3><strong>${won(s.fixed)}</strong></div>${compactCategoryBreakdown(fix)}</div>
+          <div class="summary-detail-block variable-block"><div class="summary-block-head"><h3>변동지출</h3><strong>${won(s.variable)}</strong></div>${compactCategoryBreakdown(vari)}</div>
         </div>`:''}
       </div>`;
     }).join('')}</div>
