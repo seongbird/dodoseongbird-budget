@@ -64,7 +64,7 @@ let expandedSummaryCategory = '';
 const API_URL = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.API_URL) || '';
 let PIN_HASH = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.PIN_HASH) || '';
 const DEFAULT_PIN_HASH = PIN_HASH;
-const APP_VERSION = 'v23.0 · 2026-08-28';
+const APP_VERSION = 'v24.0 · 2026-08-28';
 const PIN_SESSION_KEY = 'coupleBudget_pin_ok_v1';
 const PIN_CACHE_KEY = 'coupleBudget_pin_hash_cache_v1';
 const cachedPinHash = localStorage.getItem(PIN_CACHE_KEY) || '';
@@ -1007,7 +1007,7 @@ function annualCategoryAccordion(domain,year){
           <div><span>최대 월</span><strong>${stats.peak?Number(stats.peak.month.slice(5))+'월':'-'}</strong><small>${stats.peak?won(stats.peak.value):'기록 없음'}</small></div>
         </div>
         <div class="annual-category-chart-wrap">${annualCategoryTrendSvg(stats)}</div>
-        ${annualCategoryMonthGrid(stats)}
+        
       </div>`:''}
     </div>`;
   }).join('');
@@ -1190,7 +1190,7 @@ function categoryTrendChart(domain,categories,year,currentMonth,title){
     <div class="category-trend-legend">${series.map(s=>`<span class="trend-series-${s.si%8}"><i></i>${esc(s.label)}</span>`).join('')}</div>
     <div class="category-trend-tooltip" role="status" aria-live="polite" hidden></div>
     <svg class="category-trend-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(title)}">
-      <rect x="${bandX.toFixed(1)}" y="${top}" width="${bandW.toFixed(1)}" height="${plotH}" rx="8" class="selected-month-band"/>
+      <rect x="${bandX.toFixed(1)}" y="${Math.max(4,top-10)}" width="${bandW.toFixed(1)}" height="${plotH+20}" rx="8" class="selected-month-band"/>
       <line x1="${left}" y1="${top+plotH}" x2="${W-right}" y2="${top+plotH}" class="axis"/>
       ${paths}
       ${months.map((m,i)=>`<text x="${(left+i*step).toFixed(1)}" y="${H-10}" text-anchor="middle" class="${i===selectedIndex?'selected-month-label':''}">${i+1}월</text>`).join('')}

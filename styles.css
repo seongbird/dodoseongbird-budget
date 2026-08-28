@@ -1317,3 +1317,72 @@ input[data-money-bound="1"]{font-variant-numeric:tabular-nums}
   color:var(--cat)!important;
   border-color:transparent!important;
 }
+
+/* v24 — category trend selected-month highlight covers full plot height */
+.selected-month-band{
+  fill:rgba(118,118,128,.075)!important;
+  stroke:rgba(118,118,128,.12)!important;
+  stroke-width:1;
+  pointer-events:none;
+}
+.category-trend-line,
+.category-trend-hit,
+.category-trend-point{
+  position:relative;
+}
+
+/* v24 — fixed-expense category cards: no cropped / short-bottom appearance */
+.fixed-summary-section .category-summary-grid{
+  align-items:stretch!important;
+}
+.fixed-summary-section .category-summary-item{
+  min-height:0!important;
+  height:auto!important;
+  padding:16px 14px 17px!important;
+  display:flex!important;
+  flex-direction:column;
+  justify-content:flex-start;
+  overflow:visible!important;
+  box-sizing:border-box;
+}
+.fixed-summary-section .category-summary-item>small{
+  margin-top:auto;
+  padding-top:8px;
+  line-height:1.35;
+}
+.fixed-summary-section .category-summary-item .avg-badge{
+  margin-top:7px;
+}
+
+/* v24 — monthly labels in the income/fixed/variable trend charts */
+.category-trend-svg text{
+  font-size:11px!important;
+}
+.category-trend-svg .selected-month-label{
+  font-size:12px!important;
+  font-weight:800!important;
+}
+.summary-trend-side-row .category-trend-svg{
+  min-height:220px;
+}
+@media(max-width:760px){
+  .category-trend-svg text{font-size:10px!important}
+  .category-trend-svg .selected-month-label{font-size:11px!important}
+}
+
+/* v24 — annual category detail now relies on chart labels only */
+.annual-category-detail .annual-category-trend{
+  margin-bottom:2px;
+}
+
+.annual-cat-value{
+  font-size:11px!important;
+  font-weight:750!important;
+}
+.annual-cat-month{
+  font-size:9px!important;
+}
+@media(max-width:760px){
+  .annual-cat-value{font-size:9px!important}
+  .annual-cat-month{font-size:8px!important}
+}
