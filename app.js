@@ -29,7 +29,7 @@ let detailsSortMode = 'latest';
 const API_URL = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.API_URL) || '';
 let PIN_HASH = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.PIN_HASH) || '';
 const DEFAULT_PIN_HASH = PIN_HASH;
-const APP_VERSION = 'v14.0 · 2026-08-28';
+const APP_VERSION = 'v14.1 · 2026-08-28';
 const PIN_SESSION_KEY = 'coupleBudget_pin_ok_v1';
 const PIN_CACHE_KEY = 'coupleBudget_pin_hash_cache_v1';
 const cachedPinHash = localStorage.getItem(PIN_CACHE_KEY) || '';
@@ -954,6 +954,26 @@ function renderSimpleRecordEdit(type,recordId){
     type==='income'?renderIncome():renderFixed();
   };
 }
+
+function activeCardMonths(year){
+  const months=new Set(
+    (state.cardRecords||[])
+      .map(x=>normalizeMonthKey(x.month))
+      .filter(m=>m && m.startsWith(year+'-'))
+  );
+  return [...months].sort();
+}
+function cardMonthlyAverage(year,predicate=()=>true){
+  const months=activeCardMonths(year);
+  if(!months.length)return 0;
+  const total=months.reduce((sum,m)=>{
+    return sum+(state.cardRecords||[])
+      .filter(x=>normalizeMonthKey(x.month)===m && predicate(x))
+      .reduce((a,b)=>a+Number(b.amount||0),0);
+  },0);
+  return total/months.length;
+}
+
 async function remoteUpsertCardRecord(record){
   if(!apiConfigured()) return false;
   const payload=btoa(unescape(encodeURIComponent(JSON.stringify(record))));
