@@ -64,7 +64,7 @@ let expandedSummaryCategory = '';
 const API_URL = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.API_URL) || '';
 let PIN_HASH = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.PIN_HASH) || '';
 const DEFAULT_PIN_HASH = PIN_HASH;
-const APP_VERSION = 'v20.0 · 2026-08-28';
+const APP_VERSION = 'v21.0 · 2026-08-28';
 const PIN_SESSION_KEY = 'coupleBudget_pin_ok_v1';
 const PIN_CACHE_KEY = 'coupleBudget_pin_hash_cache_v1';
 const cachedPinHash = localStorage.getItem(PIN_CACHE_KEY) || '';
@@ -807,7 +807,7 @@ function renderDetails(){
   ].join('');
   app.innerHTML=`
     <div class="grid cols-3"><div class="card metric"><div class="metric-label">총 변동지출</div><div class="metric-value">${won(total)}</div></div><div class="card metric"><div class="metric-label">등록 건수</div><div class="metric-value">${rows.length}건</div></div><div class="card metric"><div class="metric-label">일 평균 지출</div><div class="metric-value">${won(rows.length?total/new Date(+selectedMonth.slice(0,4),+selectedMonth.slice(5,7),0).getDate():0)}</div></div></div>
-    <div class="card section-gap category-summary-section"><div class="card-head"><div><h2>대분류별 지출</h2><p>${year}년 실제 기록이 있는 월 기준 월평균과 비교합니다.</p></div></div><div class="category-summary-grid category-summary-grid-variable">${cards}</div></div>
+    <div class="card section-gap category-summary-section"><div class="card-head"><div><h2>대분류별 지출</h2><p>${year}년 실제 기록이 있는 월 기준 월평균과 비교합니다.</p></div></div><div class="category-summary-grid category-summary-grid-variable variable-summary-4x1">${cards}</div></div>
     <div class="section-gap">${categoryTrendChart('variableExpenses',['고정','생활비','식비','이벤트'],year,selectedMonth,'변동지출 대분류 월별 추이')}</div>
     <div class="card section-gap"><div class="card-head details-head"><div><h2>${selectedMonth} 세부 내역</h2><p>사용날짜·분류·실제 등록시간 기준으로 정렬할 수 있습니다.</p></div><div class="segmented details-sort"><button type="button" class="${detailsSortMode==='latest'?'active':''}" data-sort="latest">사용일 최신</button><button type="button" class="${detailsSortMode==='category'?'active':''}" data-sort="category">분류별</button><button type="button" class="${detailsSortMode==='registered'?'active':''}" data-sort="registered">등록 최신</button></div></div><div class="table-wrap">${rows.length?`<table class="table"><thead><tr><th>날짜</th><th>분류</th><th>사용내역</th><th>지출방식</th><th class="amount">금액</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.date)}</td><td><span class="pill ${categoryPillClass(x)}">${esc(expenseDisplayName(x))}</span></td><td>${esc(x.memo||'-')}</td><td>${esc(x.method)}</td><td class="amount"><strong>${won(effectiveExpenseAmount(x))}</strong>${reimbursementAmount(x)>0?`<div class="muted tiny-note">결제 ${won(x.amount)} · 회수 ${won(reimbursementAmount(x))}</div>`:''}</td><td><div class="row-actions"><button class="btn small edit-exp" data-id="${x.id}">수정</button><button class="btn small danger delete-exp" data-id="${x.id}">삭제</button></div></td></tr>`).join('')}</tbody></table>`:`<div class="empty">${selectedMonth}에 등록된 내역이 없습니다.</div>`}</div></div>`;
   document.querySelectorAll('.details-sort button').forEach(b=>b.onclick=()=>{detailsSortMode=b.dataset.sort||'latest';renderDetails();});
@@ -885,10 +885,19 @@ function summaryBarSvg(stats){
   return `<svg class="annual-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="월별 수입과 지출 비교"><line x1="${left}" y1="${top+plotH}" x2="${W-8}" y2="${top+plotH}" class="axis"/>${els.join('')}</svg>`;
 }
 function summaryNetSvg(stats){
-  const vals=stats.map(s=>s.income-s.fixed-s.variable),max=Math.max(1,...vals.map(Math.abs)),W=900,H=170,left=34,top=18,bottom=28,plotH=H-top-bottom,step=(W-left-12)/11;
+  const vals=stats.map(s=>s.income-s.fixed-s.variable);
+  const max=Math.max(1,...vals.map(Math.abs));
+  const W=900,H=260,left=34,top=18,bottom=34,plotH=H-top-bottom,step=(W-left-12)/11;
   const zero=top+plotH/2;
-  const pts=vals.map((v,i)=>`${(left+i*step).toFixed(1)},${(zero-(v/max)*(plotH*.45)).toFixed(1)}`).join(' ');
-  return `<svg class="annual-net-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="월별 순현금흐름"><line x1="${left}" y1="${zero}" x2="${W-8}" y2="${zero}" class="axis zero"/><polyline points="${pts}" fill="none" class="net-line"/>${vals.map((v,i)=>{const x=left+i*step,y=zero-(v/max)*(plotH*.45);return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4" class="${v>=0?'net-pos':'net-neg'}"><title>${i+1}월 순현금흐름 ${won(v)}</title></circle><text x="${x.toFixed(1)}" y="${H-7}" text-anchor="middle">${i+1}</text>`}).join('')}</svg>`;
+  const pts=vals.map((v,i)=>`${(left+i*step).toFixed(1)},${(zero-(v/max)*(plotH*.42)).toFixed(1)}`).join(' ');
+  return `<svg class="annual-net-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="월별 순현금흐름">
+    <line x1="${left}" y1="${zero}" x2="${W-8}" y2="${zero}" class="axis zero"/>
+    <polyline points="${pts}" fill="none" class="net-line"/>
+    ${vals.map((v,i)=>{
+      const x=left+i*step,y=zero-(v/max)*(plotH*.42);
+      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4" class="${v>=0?'net-pos':'net-neg'}"><title>${i+1}월 순현금흐름 ${won(v)}</title></circle><text x="${x.toFixed(1)}" y="${H-10}" text-anchor="middle">${i+1}</text>`;
+    }).join('')}
+  </svg>`;
 }
 function compactCategoryBreakdown(obj){
   const entries=Object.entries(obj||{}).filter(([,v])=>Number(v)!==0).sort((a,b)=>b[1]-a[1]);
@@ -1179,9 +1188,9 @@ function renderIncome(){
   const total=raw.reduce((a,b)=>a+Number(b.amount||0),0);
   const year=selectedMonth.slice(0,4),totalAvg=totalMonthlyAverage('incomes',year);
   const defaultCat=cats[0]||'공통';
-  app.innerHTML=`<div class="grid cols-2">
+  app.innerHTML=`<div class="grid cols-2 entry-metric-row">
     <div class="card"><div class="card-head"><div><h2>${selectedMonth} 수입 등록</h2><p>대분류를 선택한 뒤 항목과 금액을 입력합니다.</p></div></div>
-      <form id="incomeForm" novalidate>
+      <form id="incomeForm" class="simple-entry-form" novalidate>
         <div class="field full"><label>대분류</label>${categoryTabs('category',cats,defaultCat)}</div>
         <div class="form-grid section-gap"><div class="field"><label>수입 항목</label><input name="name" placeholder="예: 급여, 상여금" required></div><div class="field"><label>금액</label><input name="amount" inputmode="numeric" required></div></div>
         <div class="button-row"><button class="btn primary">추가</button></div>
@@ -1189,8 +1198,10 @@ function renderIncome(){
     </div>
     <div class="card metric positive"><div class="metric-label">이번 달 총수입</div><div class="metric-value">${won(total)}</div>${avgBadge(total,totalAvg,true)}<div class="metric-foot">기록월 평균 ${won(totalAvg)} · ${raw.length}개 항목</div></div>
   </div>
-  <div class="card section-gap category-summary-section"><div class="card-head"><div><h2>분류별 수입</h2><p>현재 월 합계와 데이터가 입력된 월 기준 평균을 비교합니다.</p></div></div>${categorySummaryCards(raw,displayCats,'incomes',true)}</div>
-  <div class="section-gap">${categoryTrendChart('incomes',displayCats,year,selectedMonth,'수입 대분류 월별 추이')}</div>
+  <div class="grid cols-2 equal-cols-2 summary-trend-side-row section-gap">
+    <div class="card category-summary-section income-summary-section"><div class="card-head"><div><h2>분류별 수입</h2><p>현재 월 합계와 데이터가 입력된 월 기준 평균을 비교합니다.</p></div></div>${categorySummaryCards(raw,displayCats,'incomes',true)}</div>
+    ${categoryTrendChart('incomes',displayCats,year,selectedMonth,'수입 대분류 월별 추이')}
+  </div>
   <div class="card section-gap"><div class="card-head simple-list-head"><div><h2>수입 세부내역</h2><p>분류별 또는 실제 등록시간 기준으로 볼 수 있습니다.</p></div><div class="segmented simple-sort"><button type="button" class="${incomeSortMode==='category'?'active':''}" data-sort="category">분류별</button><button type="button" class="${incomeSortMode==='registered'?'active':''}" data-sort="registered">등록 최신</button></div></div>${editorRows(list,'income')}</div>`;
 
   const form=document.getElementById('incomeForm');
@@ -1218,9 +1229,9 @@ function renderFixed(){
   const total=raw.reduce((a,b)=>a+Number(b.amount||0),0);
   const year=selectedMonth.slice(0,4),totalAvg=totalMonthlyAverage('fixedExpenses',year);
   const defaultCat=cats[0]||'주거';
-  app.innerHTML=`<div class="grid cols-2">
+  app.innerHTML=`<div class="grid cols-2 entry-metric-row">
     <div class="card"><div class="card-head"><div><h2>${selectedMonth} 기본지출 추가</h2><p>현금으로 나가는 고정지출입니다. 대분류를 선택해 등록하세요.</p></div><button class="btn small" id="copyFixedBtn" type="button">전월 기본지출 복사</button></div>
-      <form id="fixedForm" novalidate>
+      <form id="fixedForm" class="simple-entry-form" novalidate>
         <div class="field full"><label>대분류</label>${categoryTabs('category',cats,defaultCat)}</div>
         <div class="form-grid section-gap"><div class="field"><label>지출 항목</label><input name="name" placeholder="예: 관리비, 보험료" required></div><div class="field"><label>금액</label><input name="amount" inputmode="numeric" required></div></div>
         <div class="button-row"><button class="btn primary">추가</button></div>
@@ -1228,8 +1239,10 @@ function renderFixed(){
     </div>
     <div class="card metric negative"><div class="metric-label">이번 달 기본지출</div><div class="metric-value">${won(total)}</div>${avgBadge(total,totalAvg,false)}<div class="metric-foot">기록월 평균 ${won(totalAvg)} · ${raw.length}개 항목</div></div>
   </div>
-  <div class="card section-gap category-summary-section"><div class="card-head"><div><h2>분류별 기본지출</h2><p>현재 월 합계와 데이터가 입력된 월 기준 평균을 비교합니다.</p></div></div>${categorySummaryCards(raw,displayCats,'fixedExpenses',false)}</div>
-  <div class="section-gap">${categoryTrendChart('fixedExpenses',displayCats,year,selectedMonth,'기본지출 대분류 월별 추이')}</div>
+  <div class="grid cols-2 equal-cols-2 summary-trend-side-row section-gap">
+    <div class="card category-summary-section fixed-summary-section"><div class="card-head"><div><h2>분류별 기본지출</h2><p>현재 월 합계와 데이터가 입력된 월 기준 평균을 비교합니다.</p></div></div>${categorySummaryCards(raw,displayCats,'fixedExpenses',false)}</div>
+    ${categoryTrendChart('fixedExpenses',displayCats,year,selectedMonth,'기본지출 대분류 월별 추이')}
+  </div>
   <div class="card section-gap"><div class="card-head simple-list-head"><div><h2>기본지출 세부내역</h2><p>분류별 또는 실제 등록시간 기준으로 볼 수 있습니다.</p></div><div class="segmented simple-sort"><button type="button" class="${fixedSortMode==='category'?'active':''}" data-sort="category">분류별</button><button type="button" class="${fixedSortMode==='registered'?'active':''}" data-sort="registered">등록 최신</button></div></div>${editorRows(list,'fixed')}</div>`;
 
   const form=document.getElementById('fixedForm');
