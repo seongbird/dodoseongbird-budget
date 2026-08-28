@@ -13,7 +13,9 @@ const defaultState = {
     wifeCards: ['국민','현대','BC'],
     brandIcon: '₩',
     brandTitle: '우리집 가계부',
-    brandSubtitle: 'Couple Budget'
+    brandSubtitle: 'Couple Budget',
+    incomeCategories: ['남편','아내','자녀','공통'],
+    fixedCategories: ['주거','보험','헌금']
   },
   variableExpenses: [],
   incomes: {},
@@ -26,10 +28,13 @@ let state = loadState();
 let selectedMonth = currentMonth;
 let activePage = 'add';
 let detailsSortMode = 'latest';
+let incomeSortMode = 'category';
+let fixedSortMode = 'category';
+let expandedSummaryMonth = '';
 const API_URL = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.API_URL) || '';
 let PIN_HASH = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.PIN_HASH) || '';
 const DEFAULT_PIN_HASH = PIN_HASH;
-const APP_VERSION = 'v14.1 · 2026-08-28';
+const APP_VERSION = 'v15.0 · 2026-08-28';
 const PIN_SESSION_KEY = 'coupleBudget_pin_ok_v1';
 const PIN_CACHE_KEY = 'coupleBudget_pin_hash_cache_v1';
 const cachedPinHash = localStorage.getItem(PIN_CACHE_KEY) || '';
@@ -243,6 +248,8 @@ function normalizeStateModel(input){
   s.settings.variableCategories=['고정','생활비','식비','이벤트'];
   s.settings.husbandCards=Array.isArray(s.settings.husbandCards)&&s.settings.husbandCards.length?s.settings.husbandCards:[...defaultState.settings.husbandCards];
   s.settings.wifeCards=Array.isArray(s.settings.wifeCards)&&s.settings.wifeCards.length?s.settings.wifeCards:[...defaultState.settings.wifeCards];
+  s.settings.incomeCategories=Array.isArray(s.settings.incomeCategories)&&s.settings.incomeCategories.length?s.settings.incomeCategories:[...defaultState.settings.incomeCategories];
+  s.settings.fixedCategories=Array.isArray(s.settings.fixedCategories)&&s.settings.fixedCategories.length?s.settings.fixedCategories:[...defaultState.settings.fixedCategories];
   s.incomes=normalizeGroupedMonths(s.incomes||{});
   s.fixedExpenses=normalizeGroupedMonths(s.fixedExpenses||{});
   s.cardRecords=(s.cardRecords||[]).map(x=>{
@@ -768,6 +775,42 @@ function renderExpenseEdit(expenseId){
   };
 }
 
+function variableCategoryTotals(month){
+  const rows=state.variableExpenses.filter(x=>monthOf(x.date)===month);
+  const order=['고정','생활비','식비','이벤트'];
+  const out={};
+  order.forEach(c=>out[c]=rows.filter(x=>x.category===c).reduce((a,b)=>a+effectiveExpenseAmount(b),0));
+  return out;
+}
+function groupedCategoryTotals(grouped,month){
+  const out={};
+  (grouped[month]||[]).forEach(x=>{const c=x.category||'미분류';out[c]=(out[c]||0)+Number(x.amount||0);});
+  return out;
+}
+function summaryBarSvg(stats){
+  const max=Math.max(1,...stats.map(s=>Math.max(s.income,s.fixed+s.variable)));
+  const W=900,H=260,left=34,bottom=34,top=18,plotH=H-bottom-top,step=(W-left-12)/12,barW=Math.max(8,step*.24);
+  let els=[];
+  stats.forEach((s,i)=>{
+    const x=left+i*step+step*.26;
+    const ih=(s.income/max)*plotH,eh=((s.fixed+s.variable)/max)*plotH;
+    els.push(`<rect class="sum-bar income" x="${x.toFixed(1)}" y="${(top+plotH-ih).toFixed(1)}" width="${barW.toFixed(1)}" height="${ih.toFixed(1)}" rx="3"><title>${i+1}월 수입 ${won(s.income)}</title></rect>`);
+    els.push(`<rect class="sum-bar expense" x="${(x+barW+4).toFixed(1)}" y="${(top+plotH-eh).toFixed(1)}" width="${barW.toFixed(1)}" height="${eh.toFixed(1)}" rx="3"><title>${i+1}월 지출 ${won(s.fixed+s.variable)}</title></rect>`);
+    els.push(`<text x="${(x+barW).toFixed(1)}" y="${H-10}" text-anchor="middle">${i+1}</text>`);
+  });
+  return `<svg class="annual-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="월별 수입과 지출 비교"><line x1="${left}" y1="${top+plotH}" x2="${W-8}" y2="${top+plotH}" class="axis"/>${els.join('')}</svg>`;
+}
+function summaryNetSvg(stats){
+  const vals=stats.map(s=>s.income-s.fixed-s.variable),max=Math.max(1,...vals.map(Math.abs)),W=900,H=170,left=34,top=18,bottom=28,plotH=H-top-bottom,step=(W-left-12)/11;
+  const zero=top+plotH/2;
+  const pts=vals.map((v,i)=>`${(left+i*step).toFixed(1)},${(zero-(v/max)*(plotH*.45)).toFixed(1)}`).join(' ');
+  return `<svg class="annual-net-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="월별 순현금흐름"><line x1="${left}" y1="${zero}" x2="${W-8}" y2="${zero}" class="axis zero"/><polyline points="${pts}" fill="none" class="net-line"/>${vals.map((v,i)=>{const x=left+i*step,y=zero-(v/max)*(plotH*.45);return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4" class="${v>=0?'net-pos':'net-neg'}"><title>${i+1}월 순현금흐름 ${won(v)}</title></circle><text x="${x.toFixed(1)}" y="${H-7}" text-anchor="middle">${i+1}</text>`}).join('')}</svg>`;
+}
+function compactCategoryBreakdown(obj){
+  const entries=Object.entries(obj||{}).filter(([,v])=>Number(v)!==0).sort((a,b)=>b[1]-a[1]);
+  if(!entries.length)return `<div class="empty-inline">기록 없음</div>`;
+  return `<div class="summary-category-list">${entries.map(([k,v])=>`<div><span>${esc(k)}</span><strong>${won(v)}</strong></div>`).join('')}</div>`;
+}
 function renderSummary(){
   const year=String(selectedMonth||currentMonth).slice(0,4);
   const months=Array.from({length:12},(_,i)=>`${year}-${pad(i+1)}`);
@@ -775,18 +818,73 @@ function renderSummary(){
   const income=stats.reduce((a,b)=>a+b.income,0);
   const fixed=stats.reduce((a,b)=>a+b.fixed,0);
   const variable=stats.reduce((a,b)=>a+b.variable,0);
-  app.innerHTML=`<div class="grid cols-3">
-    <div class="card metric positive"><div class="metric-label">${year} 수입</div><div class="metric-value">${won(income)}</div></div>
-    <div class="card metric"><div class="metric-label">${year} 기본지출</div><div class="metric-value">${won(fixed)}</div></div>
-    <div class="card metric negative"><div class="metric-label">${year} 변동지출</div><div class="metric-value">${won(variable)}</div></div>
-  </div>
-  <div class="card section-gap"><div class="card-head"><div><h2>${year} 월별 흐름</h2><p>각 월의 수입과 지출을 간단히 비교합니다.</p></div></div>
-    <div class="year-grid">${stats.map(s=>`<div class="month-box"><strong>${Number(s.month.slice(5))}월</strong><span>수입 ${won(s.income)}</span><span>지출 ${won(s.fixed+s.variable)}</span><em>${won(s.income-s.fixed-s.variable)}</em></div>`).join('')}</div>
-  </div>`;
-}
+  const expense=fixed+variable,net=income-expense;
+  const active=stats.filter(s=>s.income||s.fixed||s.variable);
+  const avgExpense=active.length?expense/active.length:0;
+  const savingsRate=income>0?net/income*100:0;
+  const peak=active.length?[...active].sort((a,b)=>(b.fixed+b.variable)-(a.fixed+a.variable))[0]:null;
 
-const INCOME_CATEGORIES=['남편','아내','자녀','공통'];
-const FIXED_CATEGORIES=['주거','보험','그 외','헌금'];
+  app.innerHTML=`<div class="grid cols-4 annual-kpis">
+    <div class="card metric positive"><div class="metric-label">${year} 총수입</div><div class="metric-value">${won(income)}</div><div class="metric-foot">${active.length}개 기록월</div></div>
+    <div class="card metric negative"><div class="metric-label">${year} 총지출</div><div class="metric-value">${won(expense)}</div><div class="metric-foot">기본 ${won(fixed)} · 변동 ${won(variable)}</div></div>
+    <div class="card metric ${net>=0?'positive':'negative'}"><div class="metric-label">순현금흐름</div><div class="metric-value">${won(net)}</div><div class="metric-foot">저축률 ${savingsRate.toFixed(1)}%</div></div>
+    <div class="card metric"><div class="metric-label">기록월 평균 지출</div><div class="metric-value">${won(avgExpense)}</div><div class="metric-foot">${peak?`최대 ${Number(peak.month.slice(5))}월 ${won(peak.fixed+peak.variable)}`:'기록 없음'}</div></div>
+  </div>
+  <div class="grid cols-2 section-gap annual-visuals">
+    <div class="card"><div class="card-head"><div><h2>월별 수입 vs 지출</h2><p>막대를 통해 월별 규모 차이를 빠르게 비교합니다.</p></div><div class="chart-legend"><span class="income-key">수입</span><span class="expense-key">지출</span></div></div><div class="chart-scroll">${summaryBarSvg(stats)}</div></div>
+    <div class="card"><div class="card-head"><div><h2>월별 순현금흐름</h2><p>0선 위는 흑자, 아래는 적자입니다.</p></div></div><div class="chart-scroll">${summaryNetSvg(stats)}</div></div>
+  </div>
+  <div class="card section-gap"><div class="card-head"><div><h2>월별 상세 요약</h2><p>월을 눌러 수입·기본지출·변동지출의 대분류를 한 번에 확인합니다.</p></div></div>
+    <div class="annual-month-list">${stats.map(s=>{
+      const opened=expandedSummaryMonth===s.month;
+      const has=s.income||s.fixed||s.variable;
+      const inc=groupedCategoryTotals(state.incomes,s.month),fix=groupedCategoryTotals(state.fixedExpenses,s.month),vari=variableCategoryTotals(s.month);
+      return `<div class="annual-month-item ${opened?'open':''}">
+        <button type="button" class="annual-month-toggle" data-month="${s.month}" aria-expanded="${opened}">
+          <span class="month-name">${Number(s.month.slice(5))}월</span>
+          <span class="month-mini income-mini">수입 ${won(s.income)}</span>
+          <span class="month-mini expense-mini">지출 ${won(s.fixed+s.variable)}</span>
+          <strong class="${s.income-s.fixed-s.variable>=0?'positive-text':'negative-text'}">${won(s.income-s.fixed-s.variable)}</strong>
+          <span class="chevron">${opened?'⌃':'⌄'}</span>
+        </button>
+        ${opened?`<div class="annual-month-detail">
+          <div><h3>수입</h3>${compactCategoryBreakdown(inc)}</div>
+          <div><h3>기본지출</h3>${compactCategoryBreakdown(fix)}</div>
+          <div><h3>변동지출</h3>${compactCategoryBreakdown(vari)}</div>
+        </div>`:''}
+      </div>`;
+    }).join('')}</div>
+  </div>`;
+  document.querySelectorAll('.annual-month-toggle').forEach(b=>b.onclick=()=>{
+    expandedSummaryMonth=expandedSummaryMonth===b.dataset.month?'':b.dataset.month;
+    renderSummary();
+  });
+}
+function incomeCategories(){return state.settings.incomeCategories||['남편','아내','자녀','공통'];}
+function fixedCategories(){return state.settings.fixedCategories||['주거','보험','헌금'];}
+function categoriesForDisplay(list,active){
+  const seen=new Set(active||[]);
+  const out=[...(active||[])];
+  (list||[]).forEach(x=>{const c=String(x.category||'').trim();if(c&&!seen.has(c)){seen.add(c);out.push(c);}});
+  return out;
+}
+function recordCreatedMs(x){return Math.max(parseTime(x&&x.createdAt),0);}
+function sortSimpleRecords(list,mode,activeCategories){
+  const order=new Map((activeCategories||[]).map((c,i)=>[c,i]));
+  return [...(list||[])].sort((a,b)=>{
+    if(mode==='registered'){
+      const d=recordCreatedMs(b)-recordCreatedMs(a);
+      return d||String(b.id||'').localeCompare(String(a.id||''));
+    }
+    const ai=order.has(a.category)?order.get(a.category):999;
+    const bi=order.has(b.category)?order.get(b.category):999;
+    if(ai!==bi)return ai-bi;
+    const c=String(a.category||'').localeCompare(String(b.category||''),'ko');
+    if(c)return c;
+    const d=recordCreatedMs(b)-recordCreatedMs(a);
+    return d||String(b.id||'').localeCompare(String(a.id||''));
+  });
+}
 
 function activeDataMonths(groupKey,year){
   const grouped=state[groupKey]||{};
@@ -824,22 +922,25 @@ function categoryTabs(name,categories,selected){
 }
 
 function renderIncome(){
-  const list=state.incomes[selectedMonth]||[];
-  const total=list.reduce((a,b)=>a+Number(b.amount||0),0);
+  const raw=state.incomes[selectedMonth]||[];
+  const cats=incomeCategories();
+  const list=sortSimpleRecords(raw,incomeSortMode,cats);
+  const displayCats=categoriesForDisplay(raw,cats);
+  const total=raw.reduce((a,b)=>a+Number(b.amount||0),0);
   const year=selectedMonth.slice(0,4),totalAvg=totalMonthlyAverage('incomes',year);
-  const defaultCat=INCOME_CATEGORIES[0];
+  const defaultCat=cats[0]||'공통';
   app.innerHTML=`<div class="grid cols-2">
-    <div class="card"><div class="card-head"><div><h2>${selectedMonth} 수입 등록</h2><p>누구의 수입인지 먼저 선택한 뒤 항목과 금액을 입력합니다.</p></div></div>
+    <div class="card"><div class="card-head"><div><h2>${selectedMonth} 수입 등록</h2><p>대분류를 선택한 뒤 항목과 금액을 입력합니다.</p></div></div>
       <form id="incomeForm" novalidate>
-        <div class="field full"><label>대분류</label>${categoryTabs('category',INCOME_CATEGORIES,defaultCat)}</div>
-        <div class="form-grid section-gap"><div class="field"><label>수입 항목</label><input name="name" placeholder="예: 급여, 상여금" required></div><div class="field"><label>금액</label><input name="amount" type="number" min="0" inputmode="numeric" required></div></div>
+        <div class="field full"><label>대분류</label>${categoryTabs('category',cats,defaultCat)}</div>
+        <div class="form-grid section-gap"><div class="field"><label>수입 항목</label><input name="name" placeholder="예: 급여, 상여금" required></div><div class="field"><label>금액</label><input name="amount" inputmode="numeric" required></div></div>
         <div class="button-row"><button class="btn primary">추가</button></div>
       </form>
     </div>
-    <div class="card metric positive"><div class="metric-label">이번 달 총수입</div><div class="metric-value">${won(total)}</div>${avgBadge(total,totalAvg,true)}<div class="metric-foot">기록월 평균 ${won(totalAvg)} · ${list.length}개 항목</div></div>
+    <div class="card metric positive"><div class="metric-label">이번 달 총수입</div><div class="metric-value">${won(total)}</div>${avgBadge(total,totalAvg,true)}<div class="metric-foot">기록월 평균 ${won(totalAvg)} · ${raw.length}개 항목</div></div>
   </div>
-  <div class="card section-gap"><div class="card-head"><div><h2>분류별 수입</h2><p>현재 월 합계와 ${year}년 데이터가 입력된 월만 사용한 월평균을 비교합니다.</p></div></div>${categorySummaryCards(list,INCOME_CATEGORIES,'incomes',true)}</div>
-  <div class="card section-gap"><div class="card-head"><h2>수입 항목</h2></div>${editorRows(list,'income')}</div>`;
+  <div class="card section-gap"><div class="card-head"><div><h2>분류별 수입</h2><p>현재 월 합계와 데이터가 입력된 월 기준 평균을 비교합니다.</p></div></div>${categorySummaryCards(raw,displayCats,'incomes',true)}</div>
+  <div class="card section-gap"><div class="card-head simple-list-head"><div><h2>수입 세부내역</h2><p>분류별 또는 실제 등록시간 기준으로 볼 수 있습니다.</p></div><div class="segmented simple-sort"><button type="button" class="${incomeSortMode==='category'?'active':''}" data-sort="category">분류별</button><button type="button" class="${incomeSortMode==='registered'?'active':''}" data-sort="registered">등록 최신</button></div></div>${editorRows(list,'income')}</div>`;
 
   const form=document.getElementById('incomeForm');
   form.querySelectorAll('.category-entry-tabs button').forEach(b=>b.onclick=()=>{
@@ -855,25 +956,29 @@ function renderIncome(){
     state.incomes[selectedMonth]=[...(state.incomes[selectedMonth]||[]),{id:id(),category,name,amount,createdAt:now,updatedAt:now}];
     formDirty=false;saveState();renderIncome();
   };
+  document.querySelectorAll('.simple-sort button').forEach(b=>b.onclick=()=>{incomeSortMode=b.dataset.sort;renderIncome();});
   bindEditor('income');
 }
 function renderFixed(){
-  const list=state.fixedExpenses[selectedMonth]||[];
-  const total=list.reduce((a,b)=>a+Number(b.amount||0),0);
+  const raw=state.fixedExpenses[selectedMonth]||[];
+  const cats=fixedCategories();
+  const list=sortSimpleRecords(raw,fixedSortMode,cats);
+  const displayCats=categoriesForDisplay(raw,cats);
+  const total=raw.reduce((a,b)=>a+Number(b.amount||0),0);
   const year=selectedMonth.slice(0,4),totalAvg=totalMonthlyAverage('fixedExpenses',year);
-  const defaultCat=FIXED_CATEGORIES[0];
+  const defaultCat=cats[0]||'주거';
   app.innerHTML=`<div class="grid cols-2">
     <div class="card"><div class="card-head"><div><h2>${selectedMonth} 기본지출 추가</h2><p>현금으로 나가는 고정지출입니다. 대분류를 선택해 등록하세요.</p></div><button class="btn small" id="copyFixedBtn" type="button">전월 기본지출 복사</button></div>
       <form id="fixedForm" novalidate>
-        <div class="field full"><label>대분류</label>${categoryTabs('category',FIXED_CATEGORIES,defaultCat)}</div>
-        <div class="form-grid section-gap"><div class="field"><label>지출 항목</label><input name="name" placeholder="예: 관리비, 보험료" required></div><div class="field"><label>금액</label><input name="amount" type="number" min="0" inputmode="numeric" required></div></div>
+        <div class="field full"><label>대분류</label>${categoryTabs('category',cats,defaultCat)}</div>
+        <div class="form-grid section-gap"><div class="field"><label>지출 항목</label><input name="name" placeholder="예: 관리비, 보험료" required></div><div class="field"><label>금액</label><input name="amount" inputmode="numeric" required></div></div>
         <div class="button-row"><button class="btn primary">추가</button></div>
       </form>
     </div>
-    <div class="card metric negative"><div class="metric-label">이번 달 기본지출</div><div class="metric-value">${won(total)}</div>${avgBadge(total,totalAvg,false)}<div class="metric-foot">기록월 평균 ${won(totalAvg)} · ${list.length}개 항목</div></div>
+    <div class="card metric negative"><div class="metric-label">이번 달 기본지출</div><div class="metric-value">${won(total)}</div>${avgBadge(total,totalAvg,false)}<div class="metric-foot">기록월 평균 ${won(totalAvg)} · ${raw.length}개 항목</div></div>
   </div>
-  <div class="card section-gap"><div class="card-head"><div><h2>분류별 기본지출</h2><p>현재 월 합계와 ${year}년 데이터가 입력된 월만 사용한 월평균을 비교합니다.</p></div></div>${categorySummaryCards(list,FIXED_CATEGORIES,'fixedExpenses',false)}</div>
-  <div class="card section-gap"><div class="card-head"><h2>기본지출 항목</h2></div>${editorRows(list,'fixed')}</div>`;
+  <div class="card section-gap"><div class="card-head"><div><h2>분류별 기본지출</h2><p>현재 월 합계와 데이터가 입력된 월 기준 평균을 비교합니다.</p></div></div>${categorySummaryCards(raw,displayCats,'fixedExpenses',false)}</div>
+  <div class="card section-gap"><div class="card-head simple-list-head"><div><h2>기본지출 세부내역</h2><p>분류별 또는 실제 등록시간 기준으로 볼 수 있습니다.</p></div><div class="segmented simple-sort"><button type="button" class="${fixedSortMode==='category'?'active':''}" data-sort="category">분류별</button><button type="button" class="${fixedSortMode==='registered'?'active':''}" data-sort="registered">등록 최신</button></div></div>${editorRows(list,'fixed')}</div>`;
 
   const form=document.getElementById('fixedForm');
   form.querySelectorAll('.category-entry-tabs button').forEach(b=>b.onclick=()=>{
@@ -890,14 +995,15 @@ function renderFixed(){
     formDirty=false;saveState();renderFixed();
   };
   const cfb=document.getElementById('copyFixedBtn');
-  if(cfb) cfb.onclick=()=>{
+  if(cfb)cfb.onclick=()=>{
     const prev=previousMonth(selectedMonth),src=state.fixedExpenses[prev]||[];
     if(!src.length){alert(`${prev}에 기본지출이 없습니다.`);return;}
     if(!confirm(`${prev} 기본지출 ${src.length}개를 가져올까요?`))return;
     const cur=state.fixedExpenses[selectedMonth]||[],now=new Date().toISOString();
-    const add=src.filter(x=>!cur.some(c=>c.name===x.name && c.category===x.category)).map(x=>({id:id(),category:x.category||'그 외',name:x.name,amount:Number(x.amount)||0,createdAt:now,updatedAt:now}));
+    const add=src.filter(x=>!cur.some(c=>c.name===x.name&&c.category===x.category)).map(x=>({id:id(),category:x.category||defaultCat,name:x.name,amount:Number(x.amount)||0,createdAt:now,updatedAt:now}));
     state.fixedExpenses[selectedMonth]=[...cur,...add];saveState();renderFixed();toast(`${add.length}개 항목을 복사했습니다.`);
   };
+  document.querySelectorAll('.simple-sort button').forEach(b=>b.onclick=()=>{fixedSortMode=b.dataset.sort;renderFixed();});
   bindEditor('fixed');
 }
 function editorRows(list,type){
@@ -926,7 +1032,7 @@ function renderSimpleRecordEdit(type,recordId){
   const list=type==='income'?(state.incomes[selectedMonth]||[]):(state.fixedExpenses[selectedMonth]||[]);
   const x=list.find(r=>r.id===recordId);
   if(!x){type==='income'?renderIncome():renderFixed();return;}
-  const cats=type==='income'?INCOME_CATEGORIES:FIXED_CATEGORIES;
+  const cats=type==='income'?incomeCategories():fixedCategories();
   const title=type==='income'?'수입 항목 수정':'기본지출 항목 수정';
   app.innerHTML=`<div class="card simple-edit-card"><div class="card-head"><div><h2>${title}</h2><p>대분류, 항목명, 금액을 모두 변경할 수 있습니다.</p></div></div>
     <form id="simpleRecordEditForm" novalidate>
@@ -1147,6 +1253,16 @@ function renderSettings(){
       </form></div>
     <div class="card"><div class="card-head"><div><h2>화면 스타일</h2><p>두 기기에서 각각 원하는 스타일을 선택할 수 있습니다.</p></div></div><div class="theme-choice"><button class="theme-option ${uiTheme==='current'?'active':''}" data-theme="current"><strong>Current</strong><span>현재의 차분한 금융앱 스타일</span></button><button class="theme-option ${uiTheme==='lovable'?'active':''}" data-theme="lovable"><strong>Lovable</strong><span>그라디언트와 친근한 SaaS 스타일</span></button></div></div>
   </div>
+  <div class="grid cols-2 section-gap">
+    <div class="card"><div class="card-head"><div><h2>월별 수입 대분류</h2><p>이름 변경은 과거 기록에도 반영됩니다. 삭제는 기존 기록을 지우지 않고 보관합니다.</p></div></div>
+      <div class="list-editor">${incomeCategories().map((x,i)=>`<div class="edit-row reorder-row category-setting-row"><input value="${esc(x)}" data-budget-cat="income" data-index="${i}" data-original="${esc(x)}"><div class="reorder-actions"><button class="icon-btn ghost move-budget-cat" data-budget-cat="income" data-index="${i}" data-dir="-1">↑</button><button class="icon-btn ghost move-budget-cat" data-budget-cat="income" data-index="${i}" data-dir="1">↓</button><button class="icon-btn ghost archive-budget-cat" data-budget-cat="income" data-index="${i}" title="분류 보관">×</button></div></div>`).join('')}</div>
+      <div class="inline-add section-gap-sm"><input id="newIncomeCategory" placeholder="새 수입 대분류"><button class="btn small add-budget-cat" data-budget-cat="income" type="button">추가</button></div>
+    </div>
+    <div class="card"><div class="card-head"><div><h2>기본지출 대분류</h2><p>신규 등록에 사용할 분류입니다. 보관한 분류의 과거 기록은 유지됩니다.</p></div></div>
+      <div class="list-editor">${fixedCategories().map((x,i)=>`<div class="edit-row reorder-row category-setting-row"><input value="${esc(x)}" data-budget-cat="fixed" data-index="${i}" data-original="${esc(x)}"><div class="reorder-actions"><button class="icon-btn ghost move-budget-cat" data-budget-cat="fixed" data-index="${i}" data-dir="-1">↑</button><button class="icon-btn ghost move-budget-cat" data-budget-cat="fixed" data-index="${i}" data-dir="1">↓</button><button class="icon-btn ghost archive-budget-cat" data-budget-cat="fixed" data-index="${i}" title="분류 보관">×</button></div></div>`).join('')}</div>
+      <div class="inline-add section-gap-sm"><input id="newFixedCategory" placeholder="새 기본지출 대분류"><button class="btn small add-budget-cat" data-budget-cat="fixed" type="button">추가</button></div>
+    </div>
+  </div>
   <div class="card section-gap">
     <div class="card-head"><div><h2>카드 종류 설정</h2><p>카드 사용 기록 메뉴에서 선택할 세부 카드 종류입니다.</p></div></div>
     <div class="grid cols-2 card-settings-grid">
@@ -1180,6 +1296,37 @@ function renderSettings(){
     if(state.settings.eventCategories.includes(v)){toast('이미 있는 이벤트 항목입니다.');input.select();return;}
     state.settings.eventCategories.push(v);saveState();renderSettings();
   };
+  function budgetCategoryArray(kind){return kind==='income'?state.settings.incomeCategories:state.settings.fixedCategories;}
+  function budgetGroupedState(kind){return kind==='income'?state.incomes:state.fixedExpenses;}
+  document.querySelectorAll('[data-budget-cat][data-original]').forEach(inp=>inp.onchange=()=>{
+    const kind=inp.dataset.budgetCat,arr=budgetCategoryArray(kind),idx=Number(inp.dataset.index),old=inp.dataset.original,v=inp.value.trim();
+    if(!v){toast('분류명을 비워둘 수 없습니다.');inp.value=old;return;}
+    if(arr.some((x,i)=>x===v&&i!==idx)){toast('이미 있는 분류명입니다.');inp.value=old;return;}
+    arr[idx]=v;
+    const grouped=budgetGroupedState(kind);
+    Object.values(grouped||{}).forEach(rows=>(rows||[]).forEach(r=>{if(r.category===old){r.category=v;r.updatedAt=new Date().toISOString();}}));
+    formDirty=false;saveState();toast('분류명과 기존 기록을 함께 변경했습니다.');renderSettings();
+  });
+  document.querySelectorAll('.move-budget-cat').forEach(b=>b.onclick=()=>{
+    const arr=budgetCategoryArray(b.dataset.budgetCat),i=Number(b.dataset.index),j=i+Number(b.dataset.dir);
+    if(j<0||j>=arr.length)return;
+    [arr[i],arr[j]]=[arr[j],arr[i]];formDirty=false;saveState();renderSettings();
+  });
+  document.querySelectorAll('.archive-budget-cat').forEach(b=>b.onclick=()=>{
+    const kind=b.dataset.budgetCat,arr=budgetCategoryArray(kind),i=Number(b.dataset.index),name=arr[i];
+    if(arr.length<=1){toast('대분류는 최소 1개가 필요합니다.');return;}
+    const grouped=budgetGroupedState(kind);
+    const used=Object.values(grouped||{}).flat().filter(r=>r.category===name).length;
+    const msg=used?`"${name}" 분류를 신규 등록 목록에서 없앨까요?\n기존 ${used}건의 기록은 삭제되지 않고 "${name}" 분류로 그대로 보관됩니다.`:`"${name}" 분류를 삭제할까요?`;
+    if(!confirm(msg))return;
+    arr.splice(i,1);formDirty=false;saveState();renderSettings();
+  });
+  document.querySelectorAll('.add-budget-cat').forEach(b=>b.onclick=()=>{
+    const kind=b.dataset.budgetCat,input=document.getElementById(kind==='income'?'newIncomeCategory':'newFixedCategory'),v=input.value.trim(),arr=budgetCategoryArray(kind);
+    if(!v){toast('새 분류명을 입력해 주세요.');input.focus();return;}
+    if(arr.includes(v)){toast('이미 있는 분류입니다.');return;}
+    arr.push(v);formDirty=false;saveState();renderSettings();
+  });
   function cardSettingsArray(owner){return owner==='husband'?state.settings.husbandCards:state.settings.wifeCards;}
   document.querySelectorAll('[data-card-owner][data-index]').forEach(el=>{
     if(el.classList.contains('delete-card-type')) return;
