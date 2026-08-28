@@ -992,3 +992,101 @@ input[data-money-bound="1"]{font-variant-numeric:tabular-nums}
 .retry-sync-btn:disabled{opacity:.45;cursor:wait}
 .retry-sync-btn[hidden]{display:none!important}
 .sidebar-foot.sync-error .retry-sync-btn{color:var(--danger)}
+
+/* v20 summary grid visual balance */
+.category-summary-section .category-summary-grid{
+  align-items:stretch;
+}
+.category-summary-section .category-summary-item,
+.category-summary-section .category-summary-card{
+  height:100%;
+  min-height:132px;
+  box-sizing:border-box;
+}
+.category-summary-section .category-summary-item{
+  justify-content:flex-start;
+}
+.category-summary-section .category-summary-grid.category-count-3{
+  grid-template-columns:repeat(3,minmax(0,1fr))!important;
+}
+.category-summary-section .category-summary-grid.category-count-4{
+  grid-template-columns:repeat(2,minmax(0,1fr))!important;
+}
+.category-summary-section .category-summary-grid.category-count-5,
+.category-summary-section .category-summary-grid.category-count-6{
+  grid-template-columns:repeat(3,minmax(0,1fr))!important;
+}
+
+/* variable expense has its own card markup, keep four cards as balanced 2x2 */
+.category-summary-grid-variable{
+  grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  align-items:stretch;
+}
+.category-summary-grid-variable>.category-summary-card{
+  min-height:150px;
+  height:100%;
+  box-sizing:border-box;
+}
+
+/* trend chart sits below, not beside the summary */
+.category-trend-card{
+  width:100%;
+}
+.category-trend-svg{
+  max-height:320px;
+}
+
+@media(max-width:760px){
+  .category-summary-section .category-summary-grid.category-count-3,
+  .category-summary-section .category-summary-grid.category-count-4,
+  .category-summary-section .category-summary-grid.category-count-5,
+  .category-summary-section .category-summary-grid.category-count-6,
+  .category-summary-grid-variable{
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  }
+}
+@media(max-width:480px){
+  .category-summary-section .category-summary-grid[class*="category-count-"],
+  .category-summary-grid-variable{
+    grid-template-columns:1fr!important;
+  }
+}
+
+/* v20 annual charts: same card height, chart bottoms align */
+.annual-visuals{
+  align-items:stretch!important;
+}
+.annual-visuals>.card{
+  display:flex!important;
+  flex-direction:column!important;
+  height:100%;
+}
+.annual-visuals>.card>.card-head{
+  flex:0 0 auto;
+}
+.annual-visuals .chart-scroll{
+  margin-top:auto!important;
+  display:flex!important;
+  align-items:flex-end!important;
+  justify-content:center;
+  height:270px!important;
+  min-height:270px!important;
+}
+.annual-visuals .annual-chart,
+.annual-visuals .annual-net-chart{
+  display:block;
+  height:230px!important;
+  max-height:230px!important;
+  margin-top:auto;
+}
+@media(max-width:900px){
+  .annual-visuals .chart-scroll{
+    min-height:220px!important;
+    height:220px!important;
+  }
+  .annual-visuals .annual-chart,
+  .annual-visuals .annual-net-chart{
+    height:190px!important;
+    max-height:190px!important;
+  }
+}
