@@ -1386,3 +1386,125 @@ input[data-money-bound="1"]{font-variant-numeric:tabular-nums}
   .annual-cat-value{font-size:9px!important}
   .annual-cat-month{font-size:8px!important}
 }
+
+/* v25 — income/fixed registration uses the same compact sizing as variable-expense registration */
+.simple-entry-form{
+  font-size:75%!important;
+}
+.simple-entry-form .field{
+  gap:5px!important;
+}
+.simple-entry-form .field label{
+  font-size:10px!important;
+  margin-bottom:4px!important;
+}
+.simple-entry-form .field input,
+.simple-entry-form .field select{
+  min-height:0!important;
+  height:auto!important;
+  padding:9px 10px!important;
+  border-radius:10px!important;
+  font-family:inherit!important;
+  font-size:12px!important;
+  line-height:normal!important;
+}
+.simple-entry-form .form-grid{
+  gap:10px!important;
+  margin-top:14px!important;
+}
+.simple-entry-form .button-row{
+  margin-top:14px!important;
+}
+.simple-entry-form .btn{
+  font-family:inherit!important;
+  font-size:11px!important;
+  padding:8px 13px!important;
+  min-height:0!important;
+}
+.simple-entry-form .category-entry-tabs{
+  gap:4px!important;
+}
+.simple-entry-form .category-entry-tabs button{
+  min-height:0!important;
+  height:auto!important;
+  padding:7px 8px!important;
+  font-size:10.5px!important;
+  line-height:1.2!important;
+}
+
+/* v25 — keep page identity/navigation entry visible while scrolling */
+.topbar{
+  position:sticky!important;
+  top:0!important;
+  z-index:18!important;
+  background:rgba(247,247,249,.88);
+  backdrop-filter:saturate(170%) blur(22px);
+  -webkit-backdrop-filter:saturate(170%) blur(22px);
+  border-bottom:1px solid rgba(118,118,128,.08);
+}
+@media(max-width:760px){
+  .topbar{
+    margin-left:-14px!important;
+    margin-right:-14px!important;
+    padding-left:14px!important;
+    padding-right:14px!important;
+  }
+}
+
+/* v25 — mobile annual-summary charts are allowed to scroll instead of shrinking unreadably */
+@media(max-width:760px){
+  .annual-visuals .chart-scroll{
+    overflow-x:auto!important;
+    overflow-y:hidden!important;
+    height:auto!important;
+    min-height:0!important;
+    display:block!important;
+    padding-bottom:4px;
+  }
+  .annual-visuals .annual-chart,
+  .annual-visuals .annual-net-chart{
+    width:720px!important;
+    min-width:720px!important;
+    max-width:none!important;
+    height:auto!important;
+    max-height:none!important;
+  }
+  .annual-chart text,
+  .annual-net-chart text{
+    font-size:14px!important;
+  }
+
+  /* category-detail accordion chart: larger canvas, horizontal scrolling */
+  .annual-category-chart-wrap{
+    overflow-x:auto!important;
+    overflow-y:hidden!important;
+    -webkit-overflow-scrolling:touch;
+    padding-bottom:5px;
+  }
+  .annual-category-trend{
+    width:760px!important;
+    min-width:760px!important;
+    max-width:none!important;
+    height:auto!important;
+  }
+  .annual-cat-value{
+    font-size:13px!important;
+    font-weight:760!important;
+  }
+  .annual-cat-month{
+    font-size:11px!important;
+  }
+}
+@media(max-width:420px){
+  .annual-visuals .annual-chart,
+  .annual-visuals .annual-net-chart{
+    width:700px!important;
+    min-width:700px!important;
+  }
+  .annual-category-trend{
+    width:740px!important;
+    min-width:740px!important;
+  }
+  .annual-cat-value{font-size:12px!important}
+  .annual-cat-month{font-size:10.5px!important}
+}

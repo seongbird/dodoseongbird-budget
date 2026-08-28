@@ -16,6 +16,7 @@ function deleteTombstoneKey(entity,idValue){return `${entity}::${String(idValue)
 function markLocalDeleted(entity,idValue){
   localDeleteTombstones[deleteTombstoneKey(entity,idValue)]=Date.now();
   localStorage.setItem(LOCAL_DELETE_KEY,JSON.stringify(localDeleteTombstones));
+  queuePendingDelete(entity,idValue);
 }
 function isLocallyDeleted(entity,idValue){
   const k=deleteTombstoneKey(entity,idValue),t=Number(localDeleteTombstones[k]||0);
@@ -27,6 +28,67 @@ function isLocallyDeleted(entity,idValue){
   }
   return true;
 }
+
+const PENDING_DELETE_KEY='coupleBudget_pending_deletes_v1';
+function loadPendingDeletes(){
+  try{
+    const raw=JSON.parse(localStorage.getItem(PENDING_DELETE_KEY)||'{}');
+    return raw&&typeof raw==='object'?raw:{};
+  }catch{return {};}
+}
+let pendingDeletes=loadPendingDeletes();
+
+function savePendingDeletes(){
+  localStorage.setItem(PENDING_DELETE_KEY,JSON.stringify(pendingDeletes));
+}
+function queuePendingDelete(entity,idValue){
+  const key=deleteTombstoneKey(entity,idValue);
+  pendingDeletes[key]={entity:String(entity),id:String(idValue),queuedAt:Date.now(),tries:Number((pendingDeletes[key]||{}).tries||0)};
+  savePendingDeletes();
+}
+function seedPendingDeletesFromLocalTombstones(){
+  Object.keys(localDeleteTombstones||{}).forEach(key=>{
+    if(pendingDeletes[key])return;
+    const p=key.indexOf('::');
+    if(p<1)return;
+    pendingDeletes[key]={entity:key.slice(0,p),id:key.slice(p+2),queuedAt:Number(localDeleteTombstones[key]||Date.now()),tries:0};
+  });
+  savePendingDeletes();
+}
+seedPendingDeletesFromLocalTombstones();
+
+let flushingDeletes=false;
+async function flushPendingDeletes(opts={}){
+  if(flushingDeletes||!apiConfigured())return false;
+  const entries=Object.entries(pendingDeletes||{});
+  if(!entries.length)return true;
+  flushingDeletes=true;
+  if(!opts.quiet)setSyncStatus(`삭제 ${entries.length}건 동기화 중…`);
+  let allOk=true;
+  try{
+    for(const [key,item] of entries){
+      try{
+        const res=await jsonpRequest({action:'deleteRecord',entity:item.entity,id:item.id});
+        if(!res||!res.ok)throw new Error((res&&res.error)||'삭제 동기화 실패');
+        delete pendingDeletes[key];
+        savePendingDeletes();
+      }catch(err){
+        allOk=false;
+        if(pendingDeletes[key]){
+          pendingDeletes[key].tries=Number(pendingDeletes[key].tries||0)+1;
+          pendingDeletes[key].lastTry=Date.now();
+          savePendingDeletes();
+        }
+        console.warn('삭제 재시도 대기',item,err);
+      }
+    }
+    if(!allOk&&!opts.quiet)setSyncStatus('일부 삭제 동기화 대기 중 · 자동 재시도',false);
+    return allOk;
+  }finally{
+    flushingDeletes=false;
+  }
+}
+
 
 const today = new Date();
 const pad = n => String(n).padStart(2,'0');
@@ -64,7 +126,7 @@ let expandedSummaryCategory = '';
 const API_URL = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.API_URL) || '';
 let PIN_HASH = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.PIN_HASH) || '';
 const DEFAULT_PIN_HASH = PIN_HASH;
-const APP_VERSION = 'v24.0 · 2026-08-28';
+const APP_VERSION = 'v25.0 · 2026-08-28';
 const PIN_SESSION_KEY = 'coupleBudget_pin_ok_v1';
 const PIN_CACHE_KEY = 'coupleBudget_pin_hash_cache_v1';
 const cachedPinHash = localStorage.getItem(PIN_CACHE_KEY) || '';
@@ -207,6 +269,7 @@ function setSyncStatus(text, ok=true){
   if(retry)retry.hidden=ok;
 }
 function remoteLoad(){
+  flushPendingDeletes({quiet:true}).catch(()=>{});
   if(formDirty){ setSyncStatus('입력 중 · 자동 동기화 잠시 멈춤'); return Promise.resolve(false); }
   if(!apiConfigured()){ setSyncStatus('설정 필요: config.js에 Apps Script 주소 입력', false); return Promise.resolve(false); }
   return new Promise((resolve,reject)=>{
@@ -283,6 +346,7 @@ if(retrySyncBtn)retrySyncBtn.onclick=async()=>{
   retrySyncBtn.disabled=true;
   setSyncStatus('재동기화 중…');
   try{
+    await flushPendingDeletes();
     await remoteLoad();
     remoteSave();
     toast('재동기화를 요청했습니다.');
@@ -812,7 +876,7 @@ function renderDetails(){
     <div class="section-gap">${categoryTrendChart('variableExpenses',['고정','생활비','식비','이벤트'],year,selectedMonth,'변동지출 대분류 월별 추이')}</div>
     <div class="card section-gap"><div class="card-head details-head"><div><h2>${selectedMonth} 세부 내역</h2><p>사용날짜·분류·실제 등록시간 기준으로 정렬할 수 있습니다.</p></div><div class="segmented details-sort"><button type="button" class="${detailsSortMode==='latest'?'active':''}" data-sort="latest">사용일 최신</button><button type="button" class="${detailsSortMode==='category'?'active':''}" data-sort="category">분류별</button><button type="button" class="${detailsSortMode==='registered'?'active':''}" data-sort="registered">등록 최신</button></div></div><div class="table-wrap">${rows.length?`<table class="table"><thead><tr><th>날짜</th><th>분류</th><th>사용내역</th><th>지출방식</th><th class="amount">금액</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.date)}</td><td><span class="pill ${categoryPillClass(x)}">${esc(expenseDisplayName(x))}</span></td><td>${esc(x.memo||'-')}</td><td>${esc(x.method)}</td><td class="amount"><strong>${won(effectiveExpenseAmount(x))}</strong>${reimbursementAmount(x)>0?`<div class="muted tiny-note">결제 ${won(x.amount)} · 회수 ${won(reimbursementAmount(x))}</div>`:''}</td><td><div class="row-actions"><button class="btn small edit-exp" data-id="${x.id}">수정</button><button class="btn small danger delete-exp" data-id="${x.id}">삭제</button></div></td></tr>`).join('')}</tbody></table>`:`<div class="empty">${selectedMonth}에 등록된 내역이 없습니다.</div>`}</div></div>`;
   document.querySelectorAll('.details-sort button').forEach(b=>b.onclick=()=>{detailsSortMode=b.dataset.sort||'latest';renderDetails();});
-  document.querySelectorAll('.delete-exp').forEach(b=>b.onclick=()=>{if(confirm('이 지출 내역을 삭제할까요?')){const rid=b.dataset.id;markLocalDeleted('variableExpenses',rid);state.variableExpenses=state.variableExpenses.filter(x=>x.id!==rid);saveLocalOnly();renderDetails();remoteDeleteRecord('variableExpenses',rid).catch(console.error);remoteSave()}});
+  document.querySelectorAll('.delete-exp').forEach(b=>b.onclick=()=>{if(confirm('이 지출 내역을 삭제할까요?')){const rid=b.dataset.id;markLocalDeleted('variableExpenses',rid);state.variableExpenses=state.variableExpenses.filter(x=>x.id!==rid);saveLocalOnly();renderDetails();flushPendingDeletes().catch(console.error)}});
   document.querySelectorAll('.edit-exp').forEach(b=>b.onclick=()=>renderExpenseEdit(b.dataset.id));
 }
 
@@ -1345,8 +1409,7 @@ function bindEditor(type){
     if(type==='income')state.incomes[selectedMonth]=(state.incomes[selectedMonth]||[]).filter(x=>x.id!==rid);
     else state.fixedExpenses[selectedMonth]=(state.fixedExpenses[selectedMonth]||[]).filter(x=>x.id!==rid);
     saveLocalOnly();
-    remoteDeleteRecord(type==='income'?'incomes':'fixedExpenses',rid).catch(console.error);
-    remoteSave();
+    flushPendingDeletes().catch(console.error);
     type==='income'?renderIncome():renderFixed();
   });
 }
@@ -1508,8 +1571,7 @@ function renderCards(){
     markLocalDeleted('cardRecords',rid);
     state.cardRecords=state.cardRecords.filter(x=>x.id!==rid);
     formDirty=false;saveLocalOnly();renderCards();
-    remoteDeleteCardRecord(rid).catch(err=>{setSyncStatus('카드 기록 삭제 오류',false);console.error(err);});
-    remoteSave();
+    flushPendingDeletes().catch(err=>{setSyncStatus('카드 기록 삭제 재시도 대기',false);console.error(err);});
   });
   document.querySelectorAll('.edit-card-record').forEach(b=>b.onclick=()=>renderCardRecordEdit(b.dataset.id));
 }
@@ -1694,4 +1756,5 @@ function renderSettings(){
 render();
 initPinGate().then(()=>{ if(!PIN_HASH || sessionStorage.getItem(PIN_SESSION_KEY)==='1') remoteLoad(); });
 setInterval(()=>{ if(document.visibilityState==='visible' && !syncing && (!PIN_HASH || sessionStorage.getItem(PIN_SESSION_KEY)==='1')) remoteLoad(); },30000);
-document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible' && !syncing && (!PIN_HASH || sessionStorage.getItem(PIN_SESSION_KEY)==='1')) remoteLoad(); });
+setInterval(()=>{ if(document.visibilityState==='visible') flushPendingDeletes({quiet:true}).catch(()=>{}); },20000);
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ flushPendingDeletes({quiet:true}).catch(()=>{}); if(!syncing && (!PIN_HASH || sessionStorage.getItem(PIN_SESSION_KEY)==='1')) remoteLoad(); } });
