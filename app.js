@@ -31,10 +31,11 @@ let detailsSortMode = 'latest';
 let incomeSortMode = 'category';
 let fixedSortMode = 'category';
 let expandedSummaryMonth = '';
+let expandedSummaryCategory = '';
 const API_URL = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.API_URL) || '';
 let PIN_HASH = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.PIN_HASH) || '';
 const DEFAULT_PIN_HASH = PIN_HASH;
-const APP_VERSION = 'v15.0 · 2026-08-28';
+const APP_VERSION = 'v17.0 · 2026-08-28';
 const PIN_SESSION_KEY = 'coupleBudget_pin_ok_v1';
 const PIN_CACHE_KEY = 'coupleBudget_pin_hash_cache_v1';
 const cachedPinHash = localStorage.getItem(PIN_CACHE_KEY) || '';
@@ -196,6 +197,24 @@ function remoteSave(){
 }
 
 
+function remoteSaveSettings(){
+  if(!apiConfigured()) return Promise.resolve(false);
+  const snapshot=structuredClone(state.settings||{});
+  setSyncStatus('설정 저장 중…');
+  return fetch(API_URL,{
+    method:'POST',mode:'no-cors',
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body:JSON.stringify({action:'saveSettings',payload:snapshot})
+  }).then(()=>{setSyncStatus('설정 저장됨');return true;})
+    .catch(err=>{setSyncStatus('설정 저장 오류',false);console.error(err);return false;});
+}
+function saveSettingsState(withData=false){
+  saveLocalOnly();
+  remoteSaveSettings();
+  if(withData) remoteSave();
+}
+
+
 async function remoteDeleteRecord(entity,idValue){
   if(!apiConfigured()) return false;
   const res=await jsonpRequest({action:'deleteRecord',entity:String(entity),id:String(idValue)});
@@ -305,7 +324,7 @@ function mergeStateNoLoss(localState,remoteState){
   remote.incomes=mg(local.incomes,remote.incomes);
   remote.fixedExpenses=mg(local.fixedExpenses,remote.fixedExpenses);
   remote.monthlyLimits={...(remote.monthlyLimits||{}),...(local.monthlyLimits||{})};
-  remote.settings={...remote.settings,...local.settings};
+  remote.settings={...local.settings,...remote.settings};
   return normalizeStateModel(remote);
 }
 function saveState(){ saveLocalOnly(); remoteSave(); }
@@ -811,6 +830,111 @@ function compactCategoryBreakdown(obj){
   if(!entries.length)return `<div class="empty-inline">기록 없음</div>`;
   return `<div class="summary-category-list">${entries.map(([k,v])=>`<div><span>${esc(k)}</span><strong>${won(v)}</strong></div>`).join('')}</div>`;
 }
+function annualDomainMeta(domain){
+  if(domain==='income') return {label:'수입',positiveGood:true};
+  if(domain==='fixed') return {label:'기본지출',positiveGood:false};
+  return {label:'변동지출',positiveGood:false};
+}
+function annualDomainRows(domain,month){
+  if(domain==='income') return state.incomes[month]||[];
+  if(domain==='fixed') return state.fixedExpenses[month]||[];
+  return state.variableExpenses.filter(x=>monthOf(x.date)===month);
+}
+function annualDomainCategories(domain,year){
+  const active=domain==='income'?incomeCategories():(domain==='fixed'?fixedCategories():['고정','생활비','식비','이벤트']);
+  const seen=new Set(active),out=[...active];
+  for(let i=1;i<=12;i++){
+    const month=`${year}-${pad(i)}`;
+    annualDomainRows(domain,month).forEach(r=>{
+      const c=String(r.category||'미분류');
+      if(c&&!seen.has(c)){seen.add(c);out.push(c);}
+    });
+  }
+  return out;
+}
+function annualCategoryMonthValue(domain,month,category){
+  const rows=annualDomainRows(domain,month).filter(x=>(x.category||'미분류')===category);
+  if(domain==='variable') return rows.reduce((a,b)=>a+effectiveExpenseAmount(b),0);
+  return rows.reduce((a,b)=>a+Number(b.amount||0),0);
+}
+function annualCategorySeries(domain,category,year){
+  return Array.from({length:12},(_,i)=>{
+    const month=`${year}-${pad(i+1)}`;
+    return {month,value:annualCategoryMonthValue(domain,month,category)};
+  });
+}
+function annualCategoryStats(domain,category,year){
+  const series=annualCategorySeries(domain,category,year);
+  const total=series.reduce((a,b)=>a+b.value,0);
+  const active=series.filter(x=>x.value!==0);
+  const avg=active.length?total/active.length:0;
+  const peak=active.length?[...active].sort((a,b)=>b.value-a.value)[0]:null;
+  const prevYear=String(Number(year)-1);
+  const prevSeries=annualCategorySeries(domain,category,prevYear);
+  const prevTotal=prevSeries.reduce((a,b)=>a+b.value,0);
+  const diff=total-prevTotal;
+  const pct=prevTotal>0?(diff/prevTotal*100):null;
+  return {series,total,activeMonths:active.length,avg,peak,prevYear,prevTotal,diff,pct};
+}
+function annualCategoryCompareMarkup(stats,positiveGood){
+  if(stats.prevTotal<=0){
+    return `<span class="annual-cat-compare neutral">전년 데이터 없음</span>`;
+  }
+  const up=stats.diff>=0;
+  const good=positiveGood?up:!up;
+  return `<span class="annual-cat-compare ${good?'good':'warn'}">${stats.prevYear}년 대비 ${up?'+':'-'}${Math.abs(stats.pct).toFixed(1)}%</span>`;
+}
+function annualCategoryTrendSvg(stats){
+  const vals=stats.series.map(x=>x.value);
+  const max=Math.max(1,...vals);
+  const W=720,H=150,left=24,right=10,top=12,bottom=28;
+  const plotH=H-top-bottom,step=(W-left-right)/12,barW=Math.max(10,step*.48);
+  return `<svg class="annual-category-trend" viewBox="0 0 ${W} ${H}" role="img" aria-label="12개월 월별 추이">
+    <line x1="${left}" y1="${top+plotH}" x2="${W-right}" y2="${top+plotH}" class="axis"/>
+    ${stats.series.map((p,i)=>{
+      const h=(p.value/max)*plotH;
+      const x=left+i*step+(step-barW)/2;
+      const y=top+plotH-h;
+      return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="3" class="annual-cat-bar"><title>${i+1}월 ${won(p.value)}</title></rect>
+      <text x="${(x+barW/2).toFixed(1)}" y="${H-8}" text-anchor="middle">${i+1}</text>`;
+    }).join('')}
+  </svg>`;
+}
+function annualCategoryMonthGrid(stats){
+  return `<div class="annual-category-month-grid">${stats.series.map((p,i)=>`<div class="${p.value===0?'zero':''}"><span>${i+1}월</span><strong>${won(p.value)}</strong></div>`).join('')}</div>`;
+}
+function annualCategoryAccordion(domain,year){
+  const meta=annualDomainMeta(domain);
+  const cats=annualDomainCategories(domain,year);
+  const rows=cats.map(category=>{
+    const stats=annualCategoryStats(domain,category,year);
+    const key=`${domain}::${category}`;
+    const open=expandedSummaryCategory===key;
+    return `<div class="annual-category-item ${open?'open':''}">
+      <button type="button" class="annual-category-toggle" data-key="${esc(key)}" aria-expanded="${open}">
+        <span class="annual-category-name">${esc(category)}</span>
+        <span class="annual-category-year-total">${year} 합계 <strong>${won(stats.total)}</strong></span>
+        ${annualCategoryCompareMarkup(stats,meta.positiveGood)}
+        <span class="chevron">${open?'⌃':'⌄'}</span>
+      </button>
+      ${open?`<div class="annual-category-detail">
+        <div class="annual-category-kpis">
+          <div><span>${year} 총합</span><strong>${won(stats.total)}</strong></div>
+          <div><span>기록월 평균</span><strong>${won(stats.avg)}</strong><small>${stats.activeMonths}개 기록월</small></div>
+          <div><span>${stats.prevYear} 총합</span><strong>${won(stats.prevTotal)}</strong><small>${stats.prevTotal>0?(stats.diff>=0?'+':'-')+won(Math.abs(stats.diff)):'비교 데이터 없음'}</small></div>
+          <div><span>최대 월</span><strong>${stats.peak?Number(stats.peak.month.slice(5))+'월':'-'}</strong><small>${stats.peak?won(stats.peak.value):'기록 없음'}</small></div>
+        </div>
+        <div class="annual-category-chart-wrap">${annualCategoryTrendSvg(stats)}</div>
+        ${annualCategoryMonthGrid(stats)}
+      </div>`:''}
+    </div>`;
+  }).join('');
+  return `<div class="annual-category-domain">
+    <div class="annual-category-domain-head"><h3>${meta.label}</h3><p>${year}년 대분류별 총합과 월별 변화</p></div>
+    <div class="annual-category-list">${rows||'<div class="empty">기록이 없습니다.</div>'}</div>
+  </div>`;
+}
+
 function renderSummary(){
   const year=String(selectedMonth||currentMonth).slice(0,4);
   const months=Array.from({length:12},(_,i)=>`${year}-${pad(i+1)}`);
@@ -849,14 +973,26 @@ function renderSummary(){
         </button>
         ${opened?`<div class="annual-month-detail">
           <div><h3>수입</h3>${compactCategoryBreakdown(inc)}</div>
-          <div><h3>기본지출</h3>${compactCategoryBreakdown(fix)}</div>
-          <div><h3>변동지출</h3>${compactCategoryBreakdown(vari)}</div>
+          <div><div class="summary-block-head"><h3>기본지출</h3><strong>${won(s.fixed)}</strong></div>${compactCategoryBreakdown(fix)}</div>
+          <div><div class="summary-block-head"><h3>변동지출</h3><strong>${won(s.variable)}</strong></div>${compactCategoryBreakdown(vari)}</div>
         </div>`:''}
       </div>`;
     }).join('')}</div>
+  </div>
+  <div class="card section-gap">
+    <div class="card-head"><div><h2>대분류별 상세 요약</h2><p>대분류를 펼쳐 연간 총합, 12개월 변화, 기록월 평균과 전년 동기 비교를 확인합니다.</p></div></div>
+    <div class="annual-category-domains">
+      ${annualCategoryAccordion('income',year)}
+      ${annualCategoryAccordion('fixed',year)}
+      ${annualCategoryAccordion('variable',year)}
+    </div>
   </div>`;
   document.querySelectorAll('.annual-month-toggle').forEach(b=>b.onclick=()=>{
     expandedSummaryMonth=expandedSummaryMonth===b.dataset.month?'':b.dataset.month;
+    renderSummary();
+  });
+  document.querySelectorAll('.annual-category-toggle').forEach(b=>b.onclick=()=>{
+    expandedSummaryCategory=expandedSummaryCategory===b.dataset.key?'':b.dataset.key;
     renderSummary();
   });
 }
@@ -911,7 +1047,7 @@ function avgBadge(value,avg,positiveGood){
 }
 function categorySummaryCards(list,categories,groupKey,positiveGood){
   const year=selectedMonth.slice(0,4);
-  return `<div class="category-summary-grid">${categories.map(c=>{
+  return `<div class="category-summary-grid auto-category-grid category-count-${Math.min(8,Math.max(1,categories.length))}">${categories.map(c=>{
     const v=list.filter(x=>(x.category||'')===c).reduce((a,b)=>a+Number(b.amount||0),0);
     const avg=categoryMonthlyAverage(groupKey,c,year);
     return `<div class="category-summary-item"><span>${c}</span><strong>${won(v)}</strong>${avgBadge(v,avg,positiveGood)}<small>기록월 평균 ${won(avg)}</small></div>`;
@@ -1287,14 +1423,14 @@ function renderSettings(){
     const arr=state.settings.eventCategories,i=Number(b.dataset.i),j=i+Number(b.dataset.dir);
     if(j<0||j>=arr.length)return;
     [arr[i],arr[j]]=[arr[j],arr[i]];
-    formDirty=false;saveState();renderSettings();
+    formDirty=false;saveSettingsState();renderSettings();
   });
-  document.querySelectorAll('.event-del').forEach(b=>b.onclick=()=>{state.settings.eventCategories.splice(Number(b.dataset.i),1);saveState();renderSettings()});
+  document.querySelectorAll('.event-del').forEach(b=>b.onclick=()=>{state.settings.eventCategories.splice(Number(b.dataset.i),1);saveSettingsState();renderSettings()});
   document.getElementById('addEvent').onclick=()=>{
     const input=document.getElementById('newEvent'),v=input.value.trim();
     if(!v){toast('이벤트 항목명을 입력해 주세요.');input.focus();return;}
     if(state.settings.eventCategories.includes(v)){toast('이미 있는 이벤트 항목입니다.');input.select();return;}
-    state.settings.eventCategories.push(v);saveState();renderSettings();
+    state.settings.eventCategories.push(v);saveSettingsState();renderSettings();
   };
   function budgetCategoryArray(kind){return kind==='income'?state.settings.incomeCategories:state.settings.fixedCategories;}
   function budgetGroupedState(kind){return kind==='income'?state.incomes:state.fixedExpenses;}
@@ -1305,12 +1441,12 @@ function renderSettings(){
     arr[idx]=v;
     const grouped=budgetGroupedState(kind);
     Object.values(grouped||{}).forEach(rows=>(rows||[]).forEach(r=>{if(r.category===old){r.category=v;r.updatedAt=new Date().toISOString();}}));
-    formDirty=false;saveState();toast('분류명과 기존 기록을 함께 변경했습니다.');renderSettings();
+    formDirty=false;saveSettingsState(true);toast('분류명과 기존 기록을 함께 변경했습니다.');renderSettings();
   });
   document.querySelectorAll('.move-budget-cat').forEach(b=>b.onclick=()=>{
     const arr=budgetCategoryArray(b.dataset.budgetCat),i=Number(b.dataset.index),j=i+Number(b.dataset.dir);
     if(j<0||j>=arr.length)return;
-    [arr[i],arr[j]]=[arr[j],arr[i]];formDirty=false;saveState();renderSettings();
+    [arr[i],arr[j]]=[arr[j],arr[i]];formDirty=false;saveSettingsState();renderSettings();
   });
   document.querySelectorAll('.archive-budget-cat').forEach(b=>b.onclick=()=>{
     const kind=b.dataset.budgetCat,arr=budgetCategoryArray(kind),i=Number(b.dataset.index),name=arr[i];
@@ -1319,13 +1455,13 @@ function renderSettings(){
     const used=Object.values(grouped||{}).flat().filter(r=>r.category===name).length;
     const msg=used?`"${name}" 분류를 신규 등록 목록에서 없앨까요?\n기존 ${used}건의 기록은 삭제되지 않고 "${name}" 분류로 그대로 보관됩니다.`:`"${name}" 분류를 삭제할까요?`;
     if(!confirm(msg))return;
-    arr.splice(i,1);formDirty=false;saveState();renderSettings();
+    arr.splice(i,1);formDirty=false;saveSettingsState();renderSettings();
   });
   document.querySelectorAll('.add-budget-cat').forEach(b=>b.onclick=()=>{
     const kind=b.dataset.budgetCat,input=document.getElementById(kind==='income'?'newIncomeCategory':'newFixedCategory'),v=input.value.trim(),arr=budgetCategoryArray(kind);
     if(!v){toast('새 분류명을 입력해 주세요.');input.focus();return;}
     if(arr.includes(v)){toast('이미 있는 분류입니다.');return;}
-    arr.push(v);formDirty=false;saveState();renderSettings();
+    arr.push(v);formDirty=false;saveSettingsState();renderSettings();
   });
   function cardSettingsArray(owner){return owner==='husband'?state.settings.husbandCards:state.settings.wifeCards;}
   document.querySelectorAll('[data-card-owner][data-index]').forEach(el=>{
@@ -1334,24 +1470,24 @@ function renderSettings(){
       const arr=cardSettingsArray(el.dataset.cardOwner),idx=Number(el.dataset.index),v=el.value.trim();
       if(!v){toast('카드 종류 이름을 비워둘 수 없습니다.');el.value=arr[idx]||'';return;}
       if(arr.some((x,i)=>x===v&&i!==idx)){toast('이미 등록된 카드 종류입니다.');el.value=arr[idx]||'';return;}
-      arr[idx]=v;formDirty=false;saveState();toast('카드 종류를 수정했습니다.');
+      arr[idx]=v;formDirty=false;saveSettingsState();toast('카드 종류를 수정했습니다.');
     };
   });
   document.querySelectorAll('.move-card-type').forEach(b=>b.onclick=()=>{
     const arr=cardSettingsArray(b.dataset.cardOwner),i=Number(b.dataset.index),j=i+Number(b.dataset.dir);
     if(j<0||j>=arr.length)return;
     [arr[i],arr[j]]=[arr[j],arr[i]];
-    formDirty=false;saveState();renderSettings();
+    formDirty=false;saveSettingsState();renderSettings();
   });
   document.querySelectorAll('.delete-card-type').forEach(b=>b.onclick=()=>{
     const arr=cardSettingsArray(b.dataset.cardOwner),idx=Number(b.dataset.index);
-    arr.splice(idx,1);formDirty=false;saveState();renderSettings();
+    arr.splice(idx,1);formDirty=false;saveSettingsState();renderSettings();
   });
   function addCardType(owner,inputId){
     const input=document.getElementById(inputId),v=input.value.trim(),arr=cardSettingsArray(owner);
     if(!v){toast('카드 종류를 입력해 주세요.');input.focus();return;}
     if(arr.includes(v)){toast('이미 등록된 카드 종류입니다.');input.select();return;}
-    arr.push(v);formDirty=false;saveState();renderSettings();
+    arr.push(v);formDirty=false;saveSettingsState();renderSettings();
   }
   document.getElementById('addHusbandCard').onclick=()=>addCardType('husband','newHusbandCard');
   document.getElementById('addWifeCard').onclick=()=>addCardType('wife','newWifeCard');
@@ -1362,7 +1498,7 @@ function renderSettings(){
     state.settings.brandIcon=String(f.get('brandIcon')||'₩').trim()||'₩';
     state.settings.brandTitle=String(f.get('brandTitle')||'우리집 가계부').trim()||'우리집 가계부';
     state.settings.brandSubtitle=String(f.get('brandSubtitle')||'Couple Budget').trim();
-    formDirty=false;saveState();applyBrand();toast('가계부 이름을 저장했습니다.');
+    formDirty=false;saveSettingsState();applyBrand();toast('가계부 이름을 저장했습니다.');
   };
   document.querySelectorAll('.theme-option').forEach(b=>b.onclick=()=>{applyTheme(b.dataset.theme);renderSettings();toast('화면 스타일을 변경했습니다.');});
   const pinForm=document.getElementById('pinChangeForm'); if(pinForm) pinForm.onsubmit=async(e)=>{e.preventDefault();const current=document.getElementById('currentPin').value,np=document.getElementById('newPin').value,np2=document.getElementById('newPin2').value,msg=document.getElementById('pinChangeMsg'); if(np!==np2){msg.textContent='새 PIN 두 값이 서로 다릅니다.';msg.className='helper-text error';return;} try{msg.textContent='변경 중…';await changeSharedPin(current,np);msg.textContent='PIN이 변경되었습니다.';msg.className='helper-text success';pinForm.reset();}catch(err){msg.textContent=err.message||'PIN 변경 실패';msg.className='helper-text error';}};
