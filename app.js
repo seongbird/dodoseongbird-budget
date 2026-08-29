@@ -211,7 +211,7 @@ let expandedSummaryCategory = '';
 const API_URL = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.API_URL) || '';
 let PIN_HASH = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.PIN_HASH) || '';
 const DEFAULT_PIN_HASH = PIN_HASH;
-const APP_VERSION = 'v31.0 · 2026-08-30';
+const APP_VERSION = 'v33.0 · 2026-08-30';
 const PIN_SESSION_KEY = 'coupleBudget_pin_ok_v1';
 const PIN_CACHE_KEY = 'coupleBudget_pin_hash_cache_v1';
 const cachedPinHash = localStorage.getItem(PIN_CACHE_KEY) || '';
@@ -492,7 +492,7 @@ const pages = [
   ['fixed','⌂','기본지출','현금으로 나가는 월별 고정지출을 관리하세요.'],
   ['income','↗','월별 수입','월별 수입 항목을 등록하고 관리하세요.'],
   ['summary','▦','연간 요약','한 해의 수입과 지출 흐름을 간단히 확인하세요.'],
-  ['cards','▤','카드 사용 기록','카드별 청구·사용 금액을 별도로 기록하세요.'],
+  ['cards','▤','카드 청구 기록','해당 월에 청구된 카드 금액을 카드별로 기록하세요.'],
   ['settings','⚙','설정','가계부 항목과 화면 표시를 관리하세요.']
 ];
 
@@ -684,6 +684,7 @@ function renderNav(){
     formDirty=false;
     if(activePage==='add') clearExpenseDraft();
     const nextPage=b.dataset.page;
+    if(nextPage==='details') detailsSortMode='latest';
     activePage=nextPage;
     closeMenu();
     window.scrollTo({top:0,left:0,behavior:'auto'});
@@ -1094,7 +1095,22 @@ function renderAdd(){
       saveLocalOnly();queuePendingUpserts('variableExpenses',addedRows);flushPendingUpserts().catch(console.error);renderAdd();toast(`${added}건을 복사했습니다.`);
     } else alert('이미 같은 카드고정지출이 등록되어 있습니다.');
   };
-  document.getElementById('goDetails').onclick=()=>{formDirty=false;clearExpenseDraft();activePage='details';render()};
+  document.getElementById('goDetails').onclick=()=>{
+    formDirty=false;
+    clearExpenseDraft();
+    detailsSortMode='registered';
+    activePage='details';
+    render();
+    requestAnimationFrame(()=>{
+      const target=document.getElementById('expenseDetailSection');
+      if(target){
+        const header=document.querySelector('.topbar');
+        const offset=(header&&getComputedStyle(header).position==='fixed'?header.getBoundingClientRect().height:0)+10;
+        const y=target.getBoundingClientRect().top+window.scrollY-offset;
+        window.scrollTo({top:Math.max(0,y),left:0,behavior:'auto'});
+      }
+    });
+  };
 }
 
 function recentExpensesHtml(){
@@ -1153,7 +1169,7 @@ function renderDetails(){
     <div class="grid cols-3"><div class="card metric"><div class="metric-label">총 변동지출</div><div class="metric-value">${won(total)}</div></div><div class="card metric"><div class="metric-label">등록 건수</div><div class="metric-value">${rows.length}건</div></div><div class="card metric"><div class="metric-label">일 평균 지출</div><div class="metric-value">${won(rows.length?total/new Date(+selectedMonth.slice(0,4),+selectedMonth.slice(5,7),0).getDate():0)}</div></div></div>
     <div class="card section-gap category-summary-section"><div class="card-head"><div><h2>대분류별 지출</h2><p>${year}년 실제 기록이 있는 월 기준 월평균과 비교합니다.</p></div></div><div class="category-summary-grid category-summary-grid-variable variable-summary-4x1">${cards}</div></div>
     <div class="section-gap">${categoryTrendChart('variableExpenses',['고정','생활비','식비','이벤트'],year,selectedMonth,'변동지출 대분류 월별 추이')}</div>
-    <div class="card section-gap"><div class="card-head details-head"><div><h2>${selectedMonth} 세부 내역</h2><p>사용날짜·분류·실제 등록시간 기준으로 정렬할 수 있습니다.</p></div><div class="segmented details-sort"><button type="button" class="${detailsSortMode==='latest'?'active':''}" data-sort="latest">사용일 최신</button><button type="button" class="${detailsSortMode==='category'?'active':''}" data-sort="category">분류별</button><button type="button" class="${detailsSortMode==='registered'?'active':''}" data-sort="registered">등록 최신</button></div></div><div class="table-wrap">${rows.length?`<table class="table"><thead><tr><th>날짜</th><th>분류</th><th>사용내역</th><th>지출방식</th><th class="amount">금액</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.date)}</td><td><span class="pill ${categoryPillClass(x)}">${esc(expenseDisplayName(x))}</span></td><td>${esc(x.memo||'-')}${installmentLabel(x)?`<div class="installment-note">${esc(installmentLabel(x))}${x.purchaseDate?` · 결제 ${esc(x.purchaseDate)}`:''}</div>`:''}</td><td>${esc(x.method)}</td><td class="amount"><strong>${won(effectiveExpenseAmount(x))}</strong>${reimbursementAmount(x)>0?`<div class="muted tiny-note">결제 ${won(x.amount)} · 회수 ${won(reimbursementAmount(x))}</div>`:''}</td><td><div class="row-actions"><button class="btn small edit-exp" data-id="${x.id}">수정</button><button class="btn small danger delete-exp" data-id="${x.id}">삭제</button></div></td></tr>`).join('')}</tbody></table>`:`<div class="empty">${selectedMonth}에 등록된 내역이 없습니다.</div>`}</div></div>`;
+    <div class="card section-gap" id="expenseDetailSection"><div class="card-head details-head"><div><h2>${selectedMonth} 세부 내역</h2><p>사용날짜·분류·실제 등록시간 기준으로 정렬할 수 있습니다.</p></div><div class="segmented details-sort"><button type="button" class="${detailsSortMode==='latest'?'active':''}" data-sort="latest">사용일 최신</button><button type="button" class="${detailsSortMode==='category'?'active':''}" data-sort="category">분류별</button><button type="button" class="${detailsSortMode==='registered'?'active':''}" data-sort="registered">등록 최신</button></div></div><div class="table-wrap">${rows.length?`<table class="table"><thead><tr><th>날짜</th><th>분류</th><th>사용내역</th><th>지출방식</th><th class="amount">금액</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.date)}</td><td><span class="pill ${categoryPillClass(x)}">${esc(expenseDisplayName(x))}</span></td><td>${esc(x.memo||'-')}${installmentLabel(x)?`<div class="installment-note">${esc(installmentLabel(x))}${x.purchaseDate?` · 결제 ${esc(x.purchaseDate)}`:''}</div>`:''}</td><td>${esc(x.method)}</td><td class="amount"><strong>${won(effectiveExpenseAmount(x))}</strong>${reimbursementAmount(x)>0?`<div class="muted tiny-note">결제 ${won(x.amount)} · 회수 ${won(reimbursementAmount(x))}</div>`:''}</td><td><div class="row-actions"><button class="btn small edit-exp" data-id="${x.id}">수정</button><button class="btn small danger delete-exp" data-id="${x.id}">삭제</button></div></td></tr>`).join('')}</tbody></table>`:`<div class="empty">${selectedMonth}에 등록된 내역이 없습니다.</div>`}</div></div>`;
   document.querySelectorAll('.details-sort button').forEach(b=>b.onclick=()=>{detailsSortMode=b.dataset.sort||'latest';renderDetails();});
   document.querySelectorAll('.delete-exp').forEach(b=>b.onclick=()=>{
     const rid=b.dataset.id;
@@ -1839,7 +1855,7 @@ function renderCards(){
     </div>
     <div class="grid cols-2 equal-cols-2 card-main-row section-gap">
       <div class="card">
-        <div class="card-head"><div><h2>카드 사용 기록 추가</h2><p>실제 변동지출과 별개로 카드 청구·확인용으로 기록합니다.</p></div></div>
+        <div class="card-head"><div><h2>카드 청구 기록 추가</h2><p>해당 월에 청구된 카드 금액을 기록합니다. 실제 사용월과는 다를 수 있습니다.</p></div></div>
         <form id="cardForm" novalidate>
           <input type="hidden" name="owner" id="cardOwner" value="${defaultOwner}">
           <input type="hidden" name="cardType" id="cardType" value="${esc(defaultType)}">
@@ -1861,7 +1877,7 @@ function renderCards(){
           <div class="button-row"><button class="btn primary">기록 추가</button></div>
         </form>
       </div>
-      <div class="card"><div class="card-head"><div><h2>이번 달 카드 기록</h2><p>${rows.length}건의 청구·확인 기록</p></div></div>
+      <div class="card"><div class="card-head"><div><h2>이번 달 카드 청구 기록</h2><p>${rows.length}건의 청구·확인 기록</p></div></div>
         ${rows.length?`<div class="card-record-table">${rows.sort((a,b)=>String(b.id||'').localeCompare(String(a.id||''))).map(x=>`<div class="card-record-row">
           <div class="card-record-main"><span class="card-record-name">${esc((x.owner||'')+(x.cardType?' · '+x.cardType:''))}</span><span class="card-record-memo">${esc(x.memo||'-')}</span></div>
           <strong class="card-record-amount">${won(x.amount)}</strong>
@@ -1902,11 +1918,11 @@ function renderCards(){
     state.cardRecords.push(rec);
     formDirty=false;saveLocalOnly();renderCards();
     queuePendingUpserts('cardRecords',[rec]);
-    flushPendingUpserts().catch(err=>{setSyncStatus('카드 기록 저장 재시도 대기',false);console.error(err);});
+    flushPendingUpserts().catch(err=>{setSyncStatus('카드 청구 기록 저장 재시도 대기',false);console.error(err);});
   };
 
   document.querySelectorAll('.delete-card-record').forEach(b=>b.onclick=()=>{
-    if(!confirm('이 카드 기록을 삭제할까요?')) return;
+    if(!confirm('이 카드 청구 기록을 삭제할까요?')) return;
     const rid=b.dataset.id;
     markLocalDeleted('cardRecords',rid);
     state.cardRecords=state.cardRecords.filter(x=>x.id!==rid);
@@ -1962,7 +1978,7 @@ function renderCardRecordEdit(recordId){
     Object.assign(x,{owner:newOwner,cardType:newType,card:newOwner+'카드',amount,memo,updatedAt:new Date().toISOString()});
     formDirty=false;saveLocalOnly();toast('카드 기록을 수정했습니다.');renderCards();
     queuePendingUpserts('cardRecords',[x]);
-    flushPendingUpserts().catch(err=>{setSyncStatus('카드 기록 수정 재시도 대기',false);console.error(err);});
+    flushPendingUpserts().catch(err=>{setSyncStatus('카드 청구 기록 수정 재시도 대기',false);console.error(err);});
   };
 }
 

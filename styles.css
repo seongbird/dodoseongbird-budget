@@ -1797,3 +1797,6 @@ input[data-money-bound="1"]{font-variant-numeric:tabular-nums}
 
 /* v31 — pending sync state remains compact but visible */
 .sync-meta small{font-variant-numeric:tabular-nums}
+
+/* v32 — target section when opening 전체 보기 */
+#expenseDetailSection{scroll-margin-top:96px}
