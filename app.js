@@ -126,7 +126,7 @@ let expandedSummaryCategory = '';
 const API_URL = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.API_URL) || '';
 let PIN_HASH = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.PIN_HASH) || '';
 const DEFAULT_PIN_HASH = PIN_HASH;
-const APP_VERSION = 'v25.0 · 2026-08-28';
+const APP_VERSION = 'v26.0 · 2026-08-29';
 const PIN_SESSION_KEY = 'coupleBudget_pin_ok_v1';
 const PIN_CACHE_KEY = 'coupleBudget_pin_hash_cache_v1';
 const cachedPinHash = localStorage.getItem(PIN_CACHE_KEY) || '';
@@ -543,6 +543,7 @@ function render(){
   if(activePage==='settings') renderSettings();
   bindGlobalFormDirtyGuard();
   bindCategoryTrendTooltips();
+  bindAnnualMainTooltips();
 }
 
 globalMonth.onchange=()=>{ selectedMonth=globalMonth.value || currentMonth; formDirty=false; render(); updateCurrentMonthButton(); };
@@ -943,8 +944,14 @@ function summaryBarSvg(stats){
   stats.forEach((s,i)=>{
     const x=left+i*step+step*.26;
     const ih=(s.income/max)*plotH,eh=((s.fixed+s.variable)/max)*plotH;
-    els.push(`<rect class="sum-bar income" x="${x.toFixed(1)}" y="${(top+plotH-ih).toFixed(1)}" width="${barW.toFixed(1)}" height="${ih.toFixed(1)}" rx="3"><title>${i+1}월 수입 ${won(s.income)}</title></rect>`);
-    els.push(`<rect class="sum-bar expense" x="${(x+barW+4).toFixed(1)}" y="${(top+plotH-eh).toFixed(1)}" width="${barW.toFixed(1)}" height="${eh.toFixed(1)}" rx="3"><title>${i+1}월 지출 ${won(s.fixed+s.variable)}</title></rect>`);
+    els.push(`<g class="annual-main-hit" data-tooltip-label="${i+1}월 수입" data-tooltip-value="${won(s.income)}">
+      <rect class="annual-main-hit-area" x="${(x-5).toFixed(1)}" y="${top}" width="${(barW+10).toFixed(1)}" height="${plotH}"/>
+      <rect class="sum-bar income" x="${x.toFixed(1)}" y="${(top+plotH-ih).toFixed(1)}" width="${barW.toFixed(1)}" height="${ih.toFixed(1)}" rx="3"/>
+    </g>`);
+    els.push(`<g class="annual-main-hit" data-tooltip-label="${i+1}월 지출" data-tooltip-value="${won(s.fixed+s.variable)}">
+      <rect class="annual-main-hit-area" x="${(x+barW-1).toFixed(1)}" y="${top}" width="${(barW+10).toFixed(1)}" height="${plotH}"/>
+      <rect class="sum-bar expense" x="${(x+barW+4).toFixed(1)}" y="${(top+plotH-eh).toFixed(1)}" width="${barW.toFixed(1)}" height="${eh.toFixed(1)}" rx="3"/>
+    </g>`);
     els.push(`<text x="${(x+barW).toFixed(1)}" y="${H-10}" text-anchor="middle">${i+1}</text>`);
   });
   return `<svg class="annual-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="월별 수입과 지출 비교"><line x1="${left}" y1="${top+plotH}" x2="${W-8}" y2="${top+plotH}" class="axis"/>${els.join('')}</svg>`;
@@ -960,7 +967,10 @@ function summaryNetSvg(stats){
     <polyline points="${pts}" fill="none" class="net-line"/>
     ${vals.map((v,i)=>{
       const x=left+i*step,y=zero-(v/max)*(plotH*.42);
-      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4" class="${v>=0?'net-pos':'net-neg'}"><title>${i+1}월 순현금흐름 ${won(v)}</title></circle><text x="${x.toFixed(1)}" y="${H-10}" text-anchor="middle">${i+1}</text>`;
+      return `<g class="annual-main-hit" data-tooltip-label="${i+1}월 순현금흐름" data-tooltip-value="${won(v)}">
+        <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="13" class="annual-main-hit-area"/>
+        <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4" class="${v>=0?'net-pos':'net-neg'}"/>
+      </g><text x="${x.toFixed(1)}" y="${H-10}" text-anchor="middle">${i+1}</text>`;
     }).join('')}
   </svg>`;
 }
@@ -1101,8 +1111,8 @@ function renderSummary(){
     <div class="card metric"><div class="metric-label">기록월 평균 지출</div><div class="metric-value">${won(avgExpense)}</div><div class="metric-foot">${peak?`최대 ${Number(peak.month.slice(5))}월 ${won(peak.fixed+peak.variable)}`:'기록 없음'}</div></div>
   </div>
   <div class="grid cols-2 equal-cols-2 section-gap annual-visuals">
-    <div class="card"><div class="card-head"><div><h2>월별 수입 vs 지출</h2><p>막대를 통해 월별 규모 차이를 빠르게 비교합니다.</p></div><div class="chart-legend"><span class="income-key">수입</span><span class="expense-key">지출</span></div></div><div class="chart-scroll">${summaryBarSvg(stats)}</div></div>
-    <div class="card"><div class="card-head"><div><h2>월별 순현금흐름</h2><p>0선 위는 흑자, 아래는 적자입니다.</p></div></div><div class="chart-scroll">${summaryNetSvg(stats)}</div></div>
+    <div class="card"><div class="card-head"><div><h2>월별 수입 vs 지출</h2><p>막대를 통해 월별 규모 차이를 빠르게 비교합니다.</p></div><div class="chart-legend"><span class="income-key">수입</span><span class="expense-key">지출</span></div></div><div class="annual-main-chart-wrap"><div class="annual-main-tooltip" hidden></div><div class="chart-scroll">${summaryBarSvg(stats)}</div></div></div>
+    <div class="card"><div class="card-head"><div><h2>월별 순현금흐름</h2><p>0선 위는 흑자, 아래는 적자입니다.</p></div></div><div class="annual-main-chart-wrap"><div class="annual-main-tooltip" hidden></div><div class="chart-scroll">${summaryNetSvg(stats)}</div></div></div>
   </div>
   <div class="card section-gap"><div class="card-head"><div><h2>월별 상세 요약</h2><p>월을 눌러 수입·기본지출·변동지출의 대분류를 한 번에 확인합니다.</p></div></div>
     <div class="annual-month-list">${stats.map(s=>{
@@ -1260,6 +1270,30 @@ function categoryTrendChart(domain,categories,year,currentMonth,title){
       ${months.map((m,i)=>`<text x="${(left+i*step).toFixed(1)}" y="${H-10}" text-anchor="middle" class="${i===selectedIndex?'selected-month-label':''}">${i+1}월</text>`).join('')}
     </svg>
   </div>`;
+}
+
+
+function bindAnnualMainTooltips(){
+  document.querySelectorAll('.annual-main-chart-wrap').forEach(wrap=>{
+    const tooltip=wrap.querySelector('.annual-main-tooltip');
+    if(!tooltip)return;
+    const show=(hit,e)=>{
+      tooltip.innerHTML=`<span>${esc(hit.dataset.tooltipLabel||'')}</span><strong>${esc(hit.dataset.tooltipValue||'')}</strong>`;
+      tooltip.hidden=false;
+      const rect=wrap.getBoundingClientRect();
+      const x=Math.min(Math.max(8,e.clientX-rect.left+12),Math.max(8,rect.width-tooltip.offsetWidth-8));
+      const y=Math.max(8,e.clientY-rect.top-tooltip.offsetHeight-10);
+      tooltip.style.left=`${x}px`;
+      tooltip.style.top=`${y}px`;
+    };
+    wrap.querySelectorAll('.annual-main-hit').forEach(hit=>{
+      hit.addEventListener('pointerenter',e=>show(hit,e));
+      hit.addEventListener('pointermove',e=>show(hit,e));
+      hit.addEventListener('pointerleave',e=>{if(e.pointerType!=='touch')tooltip.hidden=true;});
+      hit.addEventListener('click',e=>{e.stopPropagation();show(hit,e);});
+    });
+    wrap.addEventListener('pointerleave',e=>{if(e.pointerType!=='touch')tooltip.hidden=true;});
+  });
 }
 
 function bindCategoryTrendTooltips(){

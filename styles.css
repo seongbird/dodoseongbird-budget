@@ -1508,3 +1508,89 @@ input[data-money-bound="1"]{font-variant-numeric:tabular-nums}
   .annual-cat-value{font-size:12px!important}
   .annual-cat-month{font-size:10.5px!important}
 }
+
+/* v26 — fixed-expense summary cards fill the full summary block height */
+.fixed-summary-section{
+  display:flex!important;
+  flex-direction:column!important;
+  height:100%!important;
+}
+.fixed-summary-section>.card-head{
+  flex:0 0 auto;
+}
+.fixed-summary-section .category-summary-grid{
+  flex:1 1 auto!important;
+  display:grid!important;
+  grid-auto-rows:1fr!important;
+  align-items:stretch!important;
+}
+.fixed-summary-section .category-summary-grid.category-count-3{
+  grid-template-columns:repeat(3,minmax(0,1fr))!important;
+}
+.fixed-summary-section .category-summary-item{
+  height:100%!important;
+  min-height:0!important;
+  display:flex!important;
+  flex-direction:column!important;
+  justify-content:flex-start!important;
+  box-sizing:border-box!important;
+  padding:16px 14px!important;
+}
+.fixed-summary-section .category-summary-item>small{
+  margin-top:auto!important;
+  padding-top:10px!important;
+}
+
+/* v26 — registration and total blocks: clean 1:1 ratio */
+.entry-metric-row{
+  grid-template-columns:repeat(2,minmax(0,1fr))!important;
+}
+
+/* v26 — month labels must be readable on desktop too */
+.category-trend-svg text{
+  font-size:13px!important;
+}
+.category-trend-svg .selected-month-label{
+  font-size:14px!important;
+  font-weight:800!important;
+}
+.annual-chart text,
+.annual-net-chart text{
+  font-size:13px!important;
+}
+
+/* v26 — annual main chart tooltip */
+.annual-main-chart-wrap{
+  position:relative;
+  flex:1 1 auto;
+  min-width:0;
+}
+.annual-main-tooltip{
+  position:absolute;
+  z-index:22;
+  pointer-events:none;
+  min-width:125px;
+  padding:9px 10px;
+  border-radius:11px;
+  background:rgba(28,28,30,.94);
+  color:#fff;
+  box-shadow:0 8px 24px rgba(0,0,0,.18);
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  font-size:10px;
+  line-height:1.35;
+}
+.annual-main-tooltip[hidden]{display:none!important}
+.annual-main-tooltip span{color:rgba(255,255,255,.72)}
+.annual-main-tooltip strong{font-size:11px;white-space:nowrap}
+.annual-main-hit{cursor:crosshair}
+.annual-main-hit-area{fill:transparent!important;stroke:none!important;pointer-events:all!important}
+
+/* Preserve/mobile: larger than desktop baseline and scrollable */
+@media(max-width:760px){
+  .category-trend-svg text{font-size:12px!important}
+  .category-trend-svg .selected-month-label{font-size:13px!important}
+  .annual-chart text,.annual-net-chart text{font-size:14px!important}
+  .annual-main-hit{cursor:pointer}
+}
