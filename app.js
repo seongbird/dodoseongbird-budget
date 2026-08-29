@@ -106,7 +106,8 @@ const defaultState = {
     brandTitle: '우리집 가계부',
     brandSubtitle: 'Couple Budget',
     incomeCategories: ['남편','아내','자녀','공통'],
-    fixedCategories: ['주거','보험','헌금']
+    fixedCategories: ['주거','보험','헌금'],
+    entryTabBehavior: 'remember'
   },
   variableExpenses: [],
   incomes: {},
@@ -126,7 +127,7 @@ let expandedSummaryCategory = '';
 const API_URL = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.API_URL) || '';
 let PIN_HASH = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.PIN_HASH) || '';
 const DEFAULT_PIN_HASH = PIN_HASH;
-const APP_VERSION = 'v26.0 · 2026-08-29';
+const APP_VERSION = 'v28.0 · 2026-08-29';
 const PIN_SESSION_KEY = 'coupleBudget_pin_ok_v1';
 const PIN_CACHE_KEY = 'coupleBudget_pin_hash_cache_v1';
 const cachedPinHash = localStorage.getItem(PIN_CACHE_KEY) || '';
@@ -323,6 +324,27 @@ async function remoteDeleteRecord(entity,idValue){
   return true;
 }
 
+
+const ENTRY_TAB_PREF_KEY='coupleBudget_entry_tab_prefs_v1';
+function loadEntryTabPrefs(){
+  try{
+    const x=JSON.parse(localStorage.getItem(ENTRY_TAB_PREF_KEY)||'{}');
+    return x&&typeof x==='object'?x:{};
+  }catch{return {};}
+}
+let entryTabPrefs=loadEntryTabPrefs();
+function rememberEntryTab(key,value){
+  if(!key||value===undefined||value===null||value==='')return;
+  entryTabPrefs[key]=String(value);
+  localStorage.setItem(ENTRY_TAB_PREF_KEY,JSON.stringify(entryTabPrefs));
+}
+function preferredEntryTab(key,options){
+  const arr=(options||[]).map(String);
+  if((state.settings&&state.settings.entryTabBehavior)==='first') return arr[0]||'';
+  const saved=String(entryTabPrefs[key]||'');
+  return saved&&arr.includes(saved)?saved:(arr[0]||'');
+}
+
 const pages = [
   ['add','＋','지출 등록','지출을 빠르게 기록하고 이번 달 잔액을 확인하세요.'],
   ['details','≡','변동지출','등록된 지출을 날짜·분류·결제수단별로 확인하세요.'],
@@ -383,6 +405,7 @@ function normalizeStateModel(input){
   s.settings.wifeCards=Array.isArray(s.settings.wifeCards)&&s.settings.wifeCards.length?s.settings.wifeCards:[...defaultState.settings.wifeCards];
   s.settings.incomeCategories=Array.isArray(s.settings.incomeCategories)&&s.settings.incomeCategories.length?s.settings.incomeCategories:[...defaultState.settings.incomeCategories];
   s.settings.fixedCategories=Array.isArray(s.settings.fixedCategories)&&s.settings.fixedCategories.length?s.settings.fixedCategories:[...defaultState.settings.fixedCategories];
+  s.settings.entryTabBehavior=['remember','first'].includes(s.settings.entryTabBehavior)?s.settings.entryTabBehavior:'remember';
   s.incomes=normalizeGroupedMonths(s.incomes||{});
   s.fixedExpenses=normalizeGroupedMonths(s.fixedExpenses||{});
   s.cardRecords=(s.cardRecords||[]).map(x=>{
@@ -675,7 +698,8 @@ function renderAdd(){
   const draftChoice=draft.categoryChoice||defaultValue;
   const draftAmount=draft.amount||'';
   const draftDate=draft.date||(selectedMonth===currentMonth?todayStr:selectedMonth+'-01');
-  const draftMethod=draft.method||((state.settings.methods||[])[0]||'');
+  const methodTabs=['남편카드','아내카드','현금'];
+  const draftMethod=draft.method||preferredEntryTab('expenseMethod',methodTabs);
   const draftMemo=draft.memo||'';
   app.innerHTML=`
     <div class="budget-summary-grid">
@@ -714,7 +738,7 @@ function renderAdd(){
             <input type="hidden" name="categoryChoice" id="expenseCat" value="${esc(draftChoice)}">
             <div class="field"><label>사용금액</label><input name="amount" type="number" min="1" inputmode="numeric" placeholder="예: 35000" value="${esc(draftAmount)}"></div>
             <div class="field"><label>사용날짜</label><input name="date" type="date" value="${esc(draftDate)}"></div>
-            <div class="field full"><label>지출방식</label><input type="hidden" name="method" id="expenseMethod" value="${esc(draftMethod||'남편카드')}"><div class="segmented expense-method-tabs" id="expenseMethodTabs">${['남편카드','아내카드','현금'].map(m=>`<button type="button" class="${m===(draftMethod||'남편카드')?'active':''}" data-method="${m}">${m}</button>`).join('')}</div></div>
+            <div class="field full"><label>지출방식</label><input type="hidden" name="method" id="expenseMethod" value="${esc(draftMethod||'남편카드')}"><div class="segmented expense-method-tabs" id="expenseMethodTabs">${methodTabs.map(m=>`<button type="button" class="${m===draftMethod?'active':''}" data-method="${m}">${m}</button>`).join('')}</div></div>
             <div class="field full"><label>사용내역</label><input name="memo" placeholder="예: 마트 장보기, 아기 기저귀, 외식" value="${esc(draftMemo)}"></div>
           <div class="field full settlement-field">
             <label class="settlement-toggle"><input type="checkbox" id="settlementToggle" ${Number(draft.reimbursedAmount||0)>0?'checked':''}><span>대납·정산 있음</span></label>
@@ -759,6 +783,7 @@ function renderAdd(){
     document.querySelectorAll('#expenseMethodTabs button').forEach(x=>x.classList.toggle('active',x===b));
     snapshotExpenseDraft(form);
     expenseDraft={...(expenseDraft||{}),method:methodInput.value};
+    rememberEntryTab('expenseMethod',methodInput.value);
     formDirty=true;
   });
   const settlementToggle=document.getElementById('settlementToggle');
@@ -1263,12 +1288,14 @@ function categoryTrendChart(domain,categories,year,currentMonth,title){
     <div class="card-head"><div><h2>${esc(title)}</h2><p>1~12월 대분류별 월간 추이 · 선택월은 강조 표시</p></div></div>
     <div class="category-trend-legend">${series.map(s=>`<span class="trend-series-${s.si%8}"><i></i>${esc(s.label)}</span>`).join('')}</div>
     <div class="category-trend-tooltip" role="status" aria-live="polite" hidden></div>
+    <div class="category-trend-scroll">
     <svg class="category-trend-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(title)}">
       <rect x="${bandX.toFixed(1)}" y="${Math.max(4,top-10)}" width="${bandW.toFixed(1)}" height="${plotH+20}" rx="8" class="selected-month-band"/>
       <line x1="${left}" y1="${top+plotH}" x2="${W-right}" y2="${top+plotH}" class="axis"/>
       ${paths}
       ${months.map((m,i)=>`<text x="${(left+i*step).toFixed(1)}" y="${H-10}" text-anchor="middle" class="${i===selectedIndex?'selected-month-label':''}">${i+1}월</text>`).join('')}
     </svg>
+    </div>
   </div>`;
 }
 
@@ -1341,7 +1368,7 @@ function renderIncome(){
   const displayCats=categoriesForDisplay(raw,cats);
   const total=raw.reduce((a,b)=>a+Number(b.amount||0),0);
   const year=selectedMonth.slice(0,4),totalAvg=totalMonthlyAverage('incomes',year);
-  const defaultCat=cats[0]||'공통';
+  const defaultCat=preferredEntryTab('incomeCategory',cats)||cats[0]||'공통';
   app.innerHTML=`<div class="grid cols-2 entry-metric-row">
     <div class="card"><div class="card-head"><div><h2>${selectedMonth} 수입 등록</h2><p>대분류를 선택한 뒤 항목과 금액을 입력합니다.</p></div></div>
       <form id="incomeForm" class="simple-entry-form" novalidate>
@@ -1361,6 +1388,7 @@ function renderIncome(){
   const form=document.getElementById('incomeForm');
   form.querySelectorAll('.category-entry-tabs button').forEach(b=>b.onclick=()=>{
     form.elements.category.value=b.dataset.category;
+    rememberEntryTab('incomeCategory',b.dataset.category);
     form.querySelectorAll('.category-entry-tabs button').forEach(x=>x.classList.toggle('active',x===b));
   });
   form.onsubmit=e=>{
@@ -1382,7 +1410,7 @@ function renderFixed(){
   const displayCats=categoriesForDisplay(raw,cats);
   const total=raw.reduce((a,b)=>a+Number(b.amount||0),0);
   const year=selectedMonth.slice(0,4),totalAvg=totalMonthlyAverage('fixedExpenses',year);
-  const defaultCat=cats[0]||'주거';
+  const defaultCat=preferredEntryTab('fixedCategory',cats)||cats[0]||'주거';
   app.innerHTML=`<div class="grid cols-2 entry-metric-row">
     <div class="card"><div class="card-head"><div><h2>${selectedMonth} 기본지출 추가</h2><p>현금으로 나가는 고정지출입니다. 대분류를 선택해 등록하세요.</p></div><button class="btn small" id="copyFixedBtn" type="button">전월 기본지출 복사</button></div>
       <form id="fixedForm" class="simple-entry-form" novalidate>
@@ -1402,6 +1430,7 @@ function renderFixed(){
   const form=document.getElementById('fixedForm');
   form.querySelectorAll('.category-entry-tabs button').forEach(b=>b.onclick=()=>{
     form.elements.category.value=b.dataset.category;
+    rememberEntryTab('fixedCategory',b.dataset.category);
     form.querySelectorAll('.category-entry-tabs button').forEach(x=>x.classList.toggle('active',x===b));
   });
   form.onsubmit=e=>{
@@ -1524,7 +1553,7 @@ function renderCards(){
   const wifeCardAvg=cardMonthlyAverage(cardYear,x=>x.owner==='아내'||x.card==='아내카드');
   const husbandCards=state.settings.husbandCards||[];
   const wifeCards=state.settings.wifeCards||[];
-  const defaultOwner='남편';
+  const defaultOwner=preferredEntryTab('cardOwner',['남편','아내'])||'남편';
   const defaultType=husbandCards[0]||'';
   app.innerHTML=`
     <div class="grid cols-3 card-totals">
@@ -1580,6 +1609,7 @@ function renderCards(){
   }
   ownerTabs.querySelectorAll('button').forEach(b=>b.onclick=()=>{
     ownerInput.value=b.dataset.owner;
+    rememberEntryTab('cardOwner',b.dataset.owner);
     ownerTabs.querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));
     typeInput.value='';
     renderTypeTabs();
@@ -1661,7 +1691,20 @@ function renderCardRecordEdit(recordId){
 }
 
 function renderSettings(){
-  app.innerHTML=`<div class="grid cols-2">
+  app.innerHTML=`<div class="card tab-behavior-card">
+    <div class="card-head"><div><h2>입력 탭 시작 방식</h2><p>등록 화면의 선택 탭이 페이지 진입 시 어떤 상태로 시작할지 정합니다.</p></div></div>
+    <div class="setting-choice-grid" id="entryTabBehaviorSetting">
+      <button type="button" class="setting-choice ${state.settings.entryTabBehavior!=='first'?'active':''}" data-value="remember">
+        <strong>마지막 사용 탭 기억</strong>
+        <span>처음에는 첫 번째 탭 · 이후에는 마지막으로 사용한 탭</span>
+      </button>
+      <button type="button" class="setting-choice ${state.settings.entryTabBehavior==='first'?'active':''}" data-value="first">
+        <strong>항상 첫 번째 탭</strong>
+        <span>페이지에 들어올 때마다 언제나 첫 번째 탭부터 시작</span>
+      </button>
+    </div>
+  </div>
+  <div class="grid cols-2 section-gap">
     <div class="card"><div class="card-head"><div><h2>이벤트 세부분류</h2><p>경조사·병원·교회 등 필요에 따라 추가할 수 있습니다.</p></div></div><div class="list-editor" id="eventList">${state.settings.eventCategories.map((x,i)=>`<div class="edit-row reorder-row"><input value="${esc(x)}" data-i="${i}"><div class="reorder-actions"><button class="icon-btn ghost move-event" data-i="${i}" data-dir="-1" title="위로">↑</button><button class="icon-btn ghost move-event" data-i="${i}" data-dir="1" title="아래로">↓</button><button class="icon-btn ghost event-del" data-i="${i}">×</button></div></div>`).join('')}</div><div class="divider"></div><div class="inline-add"><input id="newEvent" placeholder="새 이벤트 분류"><button class="btn primary" id="addEvent">추가</button></div></div>
     <div class="card brand-settings-card"><div class="card-head"><div><h2>가계부 이름</h2><p>메뉴와 PIN 화면에 표시할 아이콘과 이름을 변경합니다.</p></div></div>
       <form id="brandSettingsForm" class="form-grid">
@@ -1701,6 +1744,13 @@ function renderSettings(){
     <div class="card"><div class="card-head"><div><h2>가용금액 수정 보호</h2><p>가용금액 수정 시 현재 가계부 접속 PIN을 다시 확인합니다.</p></div></div><div class="notice">별도 관리 PIN은 사용하지 않습니다. 가계부 접속 PIN이 일치해야만 가용금액을 변경할 수 있습니다.</div></div>
     <div class="card"><div class="card-head"><div><h2>접속 PIN 변경</h2><p>변경하면 모든 기기에서 새 PIN을 사용합니다.</p></div></div><form id="pinChangeForm" class="form-grid"><label><span>현재 PIN</span><input id="currentPin" type="password" inputmode="numeric" maxlength="12" required></label><label><span>새 PIN</span><input id="newPin" type="password" inputmode="numeric" maxlength="12" placeholder="숫자 4~12자리" required></label><label><span>새 PIN 확인</span><input id="newPin2" type="password" inputmode="numeric" maxlength="12" required></label><div class="form-action"><button class="btn primary" type="submit">PIN 변경</button></div></form><div id="pinChangeMsg" class="helper-text"></div></div>
   </div>`;
+  document.querySelectorAll('#entryTabBehaviorSetting .setting-choice').forEach(btn=>btn.onclick=()=>{
+    state.settings.entryTabBehavior=btn.dataset.value==='first'?'first':'remember';
+    saveSettingsState();
+    renderSettings();
+    toast(state.settings.entryTabBehavior==='first'?'항상 첫 번째 탭으로 설정했습니다.':'마지막 사용 탭을 기억하도록 설정했습니다.');
+  });
+
   document.querySelectorAll('#eventList input').forEach(inp=>inp.onchange=()=>{state.settings.eventCategories[Number(inp.dataset.i)]=inp.value.trim();saveState()});
   document.querySelectorAll('.move-event').forEach(b=>b.onclick=()=>{
     const arr=state.settings.eventCategories,i=Number(b.dataset.i),j=i+Number(b.dataset.dir);

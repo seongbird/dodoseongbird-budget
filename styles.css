@@ -1594,3 +1594,151 @@ input[data-money-bound="1"]{font-variant-numeric:tabular-nums}
   .annual-chart text,.annual-net-chart text{font-size:14px!important}
   .annual-main-hit{cursor:pointer}
 }
+
+/* v27 mobile — fixed summary is a vertical stack, like other category summaries */
+@media(max-width:760px){
+  .fixed-summary-section .category-summary-grid.category-count-3{
+    grid-template-columns:1fr!important;
+    grid-auto-rows:auto!important;
+  }
+  .fixed-summary-section .category-summary-item{
+    height:auto!important;
+    min-height:112px!important;
+  }
+}
+
+/* v27 — monthly trend charts: readable canvas + horizontal scroll on mobile */
+.category-trend-scroll{
+  width:100%;
+  max-width:100%;
+  overflow-x:visible;
+  overflow-y:visible;
+}
+@media(max-width:760px){
+  .category-trend-card{
+    overflow:hidden;
+  }
+  .category-trend-scroll{
+    overflow-x:auto!important;
+    overflow-y:hidden!important;
+    -webkit-overflow-scrolling:touch;
+    touch-action:pan-x pan-y;
+    padding-bottom:5px;
+  }
+  .category-trend-svg,
+  .summary-trend-side-row .category-trend-svg{
+    width:820px!important;
+    min-width:820px!important;
+    max-width:none!important;
+    height:auto!important;
+    max-height:none!important;
+    min-height:0!important;
+    margin-top:0!important;
+  }
+  .category-trend-svg text{
+    font-size:13px!important;
+  }
+  .category-trend-svg .selected-month-label{
+    font-size:14px!important;
+  }
+}
+
+/* v27 — annual category accordion chart: never shrink, never clip; scroll horizontally */
+@media(max-width:760px){
+  .annual-category-item,
+  .annual-category-detail,
+  .annual-category-domain,
+  .annual-category-list{
+    min-width:0!important;
+    max-width:100%!important;
+  }
+  .annual-category-detail{
+    overflow:visible!important;
+  }
+  .annual-category-chart-wrap{
+    display:block!important;
+    width:100%!important;
+    max-width:100%!important;
+    overflow-x:auto!important;
+    overflow-y:hidden!important;
+    -webkit-overflow-scrolling:touch!important;
+    touch-action:pan-x pan-y;
+    padding:4px 0 8px!important;
+  }
+  .annual-category-trend{
+    display:block!important;
+    width:900px!important;
+    min-width:900px!important;
+    max-width:none!important;
+    height:auto!important;
+    overflow:visible!important;
+  }
+  .annual-cat-value{
+    font-size:13px!important;
+  }
+  .annual-cat-month{
+    font-size:12px!important;
+  }
+}
+@media(max-width:420px){
+  .annual-category-trend{
+    width:880px!important;
+    min-width:880px!important;
+  }
+  .annual-cat-value{font-size:12.5px!important}
+  .annual-cat-month{font-size:11.5px!important}
+}
+
+/* v27 — actual fixed mobile header. Sticky was unreliable with the page's overflow rules. */
+@media(max-width:760px){
+  .main{
+    padding-top:82px!important;
+  }
+  .topbar{
+    position:fixed!important;
+    top:0!important;
+    left:0!important;
+    right:0!important;
+    width:100%!important;
+    margin:0!important;
+    z-index:30!important;
+    padding:8px 14px 7px!important;
+    box-sizing:border-box!important;
+    background:rgba(245,245,247,.94)!important;
+    box-shadow:0 1px 0 rgba(0,0,0,.06);
+  }
+  .sidebar{
+    z-index:42!important;
+  }
+  .backdrop{
+    z-index:40!important;
+  }
+}
+
+/* v28 — settings: input tab start behavior */
+.setting-choice-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+}
+.setting-choice{
+  border:1px solid var(--line);
+  border-radius:14px;
+  background:rgba(255,255,255,.62);
+  padding:14px 15px;
+  text-align:left;
+  display:grid;
+  gap:5px;
+  min-width:0;
+}
+.setting-choice strong{font-size:12px}
+.setting-choice span{font-size:10px;color:var(--muted);line-height:1.4}
+.setting-choice.active{
+  border-color:rgba(0,113,227,.34);
+  background:rgba(0,113,227,.07);
+  box-shadow:inset 0 0 0 1px rgba(0,113,227,.05);
+}
+.setting-choice.active strong{color:var(--accent)}
+@media(max-width:620px){
+  .setting-choice-grid{grid-template-columns:1fr}
+}
