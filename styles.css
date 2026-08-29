@@ -1742,3 +1742,13 @@ input[data-money-bound="1"]{font-variant-numeric:tabular-nums}
 @media(max-width:620px){
   .setting-choice-grid{grid-template-columns:1fr}
 }
+
+/* v29 — fixed mobile header must not overlap the first content card */
+@media(max-width:760px){
+  .main{
+    padding-top:96px!important;
+  }
+  #app{
+    padding-top:8px;
+  }
+}

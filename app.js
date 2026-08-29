@@ -127,7 +127,7 @@ let expandedSummaryCategory = '';
 const API_URL = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.API_URL) || '';
 let PIN_HASH = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.PIN_HASH) || '';
 const DEFAULT_PIN_HASH = PIN_HASH;
-const APP_VERSION = 'v28.0 · 2026-08-29';
+const APP_VERSION = 'v29.0 · 2026-08-29';
 const PIN_SESSION_KEY = 'coupleBudget_pin_ok_v1';
 const PIN_CACHE_KEY = 'coupleBudget_pin_hash_cache_v1';
 const cachedPinHash = localStorage.getItem(PIN_CACHE_KEY) || '';
@@ -540,7 +540,17 @@ function applyBrand(){
 }
 function renderNav(){
   nav.innerHTML = pages.map(([key,icon,label])=>`<button class="nav-item ${activePage===key?'active':''}" data-page="${key}"><span class="nav-icon">${icon}</span>${label}</button>`).join('');
-  nav.querySelectorAll('button').forEach(b=>b.onclick=()=>{ formDirty=false; if(activePage==='add') clearExpenseDraft(); activePage=b.dataset.page; render(); closeMenu(); });
+  nav.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    formDirty=false;
+    if(activePage==='add') clearExpenseDraft();
+    const nextPage=b.dataset.page;
+    activePage=nextPage;
+    closeMenu();
+    window.scrollTo({top:0,left:0,behavior:'auto'});
+    document.documentElement.scrollTop=0;
+    document.body.scrollTop=0;
+    render();
+  });
 }
 function bindGlobalFormDirtyGuard(){
   bindMoneyInputs();
