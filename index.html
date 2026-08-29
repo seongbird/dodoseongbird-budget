@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#f5f5f7" />
   <title>우리집 가계부</title>
-  <link rel="stylesheet" href="styles.css?v=20260829d" />
+  <link rel="stylesheet" href="styles.css?v=20260830b" />
 </head>
 <body class="locked pin-pending">
   <div class="app-shell">
@@ -20,7 +20,7 @@
       <nav id="nav"></nav>
       <div class="sidebar-foot">
         <span class="dot"></span>
-        <div class="sync-meta"><div class="sync-line"><small id="syncStatus">Google Sheets 연결 확인 중…</small><button id="retrySyncBtn" class="retry-sync-btn" type="button" title="다시 동기화" aria-label="다시 동기화" hidden>↻</button></div><small class="app-version">v29.0 · 2026-08-29</small></div>
+        <div class="sync-meta"><div class="sync-line"><small id="syncStatus">Google Sheets 연결 확인 중…</small><button id="retrySyncBtn" class="retry-sync-btn" type="button" title="다시 동기화" aria-label="다시 동기화" hidden>↻</button></div><small class="app-version">v31.0 · 2026-08-30</small></div>
       </div>
     </aside>
 
@@ -57,12 +57,21 @@
         <button class="btn primary pin-btn" type="submit">가계부 열기</button>
       </form>
       <div id="pinError" class="pin-error"></div>
-      <div class="pin-version">v29.0 · 2026-08-29</div>
+      <div class="pin-version">v31.0 · 2026-08-30</div>
     </div>
+  </div>
+  <div class="global-add-wrap" id="globalAddWrap">
+    <div class="global-add-menu" id="globalAddMenu" hidden>
+      <button type="button" data-page="add"><span>＋</span><strong>변동지출</strong></button>
+      <button type="button" data-page="fixed"><span>⌂</span><strong>기본지출</strong></button>
+      <button type="button" data-page="income"><span>↗</span><strong>월별수입</strong></button>
+      <button type="button" data-page="cards"><span>▤</span><strong>카드기록</strong></button>
+    </div>
+    <button type="button" class="global-add-btn" id="globalAddBtn" aria-label="빠른 등록" title="빠른 등록">＋</button>
   </div>
   <div id="toast" class="toast"></div>
   <div id="backdrop" class="backdrop"></div>
   <script src="config.js"></script>
-  <script src="app.js?v=20260829d"></script>
+  <script src="app.js?v=20260830b"></script>
 </body>
 </html>

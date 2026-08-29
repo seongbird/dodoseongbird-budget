@@ -1,7 +1,7 @@
 const STORAGE_KEY = 'coupleBudget_v1';
 
 const LOCAL_DELETE_KEY='coupleBudget_local_delete_tombstones_v1';
-const LOCAL_DELETE_TTL_MS=24*60*60*1000;
+const LOCAL_DELETE_TTL_MS=Number.POSITIVE_INFINITY;
 function loadLocalDeleteTombstones(){
   try{
     const raw=JSON.parse(localStorage.getItem(LOCAL_DELETE_KEY)||'{}');
@@ -14,8 +14,10 @@ function loadLocalDeleteTombstones(){
 let localDeleteTombstones=loadLocalDeleteTombstones();
 function deleteTombstoneKey(entity,idValue){return `${entity}::${String(idValue)}`;}
 function markLocalDeleted(entity,idValue){
-  localDeleteTombstones[deleteTombstoneKey(entity,idValue)]=Date.now();
+  const key=deleteTombstoneKey(entity,idValue);
+  localDeleteTombstones[key]=Date.now();
   localStorage.setItem(LOCAL_DELETE_KEY,JSON.stringify(localDeleteTombstones));
+  if(pendingUpserts[key]){delete pendingUpserts[key];savePendingUpserts();}
   queuePendingDelete(entity,idValue);
 }
 function isLocallyDeleted(entity,idValue){
@@ -27,6 +29,84 @@ function isLocallyDeleted(entity,idValue){
     return false;
   }
   return true;
+}
+
+
+const PENDING_UPSERT_KEY='coupleBudget_pending_upserts_v1';
+function loadPendingUpserts(){
+  try{
+    const raw=JSON.parse(localStorage.getItem(PENDING_UPSERT_KEY)||'{}');
+    return raw&&typeof raw==='object'?raw:{};
+  }catch{return {};}
+}
+let pendingUpserts=loadPendingUpserts();
+function savePendingUpserts(){
+  localStorage.setItem(PENDING_UPSERT_KEY,JSON.stringify(pendingUpserts));
+}
+function queuePendingUpserts(entity,records){
+  (records||[]).forEach(record=>{
+    if(!record||!record.id)return;
+    const key=deleteTombstoneKey(entity,record.id);
+    pendingUpserts[key]={entity:String(entity),record:structuredClone(record),queuedAt:Date.now(),tries:Number((pendingUpserts[key]||{}).tries||0)};
+  });
+  savePendingUpserts();
+}
+async function remoteUpsertRecords(entity,records){
+  if(!apiConfigured())return {ok:false,acceptedCount:0,count:(records||[]).length};
+  const payload=btoa(unescape(encodeURIComponent(JSON.stringify({entity:String(entity),records:records||[]}))));
+  const res=await jsonpRequest({action:'upsertRecords',payload64:payload});
+  if(!res||!res.ok)throw new Error((res&&res.error)||'행 저장 실패');
+  return {
+    ok:true,
+    count:Number(res.count)||0,
+    acceptedCount:Number(res.acceptedCount ?? res.count)||0
+  };
+}
+let flushingUpserts=false;
+async function flushPendingUpserts(opts={}){
+  if(flushingUpserts||!apiConfigured())return false;
+  const entries=Object.entries(pendingUpserts||{});
+  if(!entries.length)return true;
+  flushingUpserts=true;
+  let allOk=true;
+  try{
+    const groups={};
+    entries.forEach(([key,item])=>{
+      if(!groups[item.entity])groups[item.entity]=[];
+      groups[item.entity].push([key,item]);
+    });
+    for(const [entity,items] of Object.entries(groups)){
+      try{
+        const result=await remoteUpsertRecords(entity,items.map(([,item])=>item.record));
+        // rejected rows are normally IDs that were already tombstoned on another device.
+        // They must not be retried into resurrection.
+        items.forEach(([key])=>delete pendingUpserts[key]);
+        savePendingUpserts();
+        if(result.acceptedCount<result.count){
+          console.info('서버 삭제 상태가 우선되어 일부 로컬 변경을 폐기했습니다.',entity,result);
+        }
+      }catch(err){
+        allOk=false;
+        items.forEach(([key,item])=>{
+          if(pendingUpserts[key]){
+            pendingUpserts[key].tries=Number(item.tries||0)+1;
+            pendingUpserts[key].lastTry=Date.now();
+          }
+        });
+        savePendingUpserts();
+        console.warn('저장 재시도 대기',entity,err);
+      }
+    }
+    if(!allOk&&!opts.quiet)setSyncStatus('일부 변경사항 동기화 대기 중 · 자동 재시도',false);
+    return allOk;
+  }finally{
+    flushingUpserts=false;
+  }
+}
+async function flushPendingMutations(opts={}){
+  const u=await flushPendingUpserts(opts);
+  const d=await flushPendingDeletes(opts);
+  return u&&d;
 }
 
 const PENDING_DELETE_KEY='coupleBudget_pending_deletes_v1';
@@ -72,6 +152,10 @@ async function flushPendingDeletes(opts={}){
         if(!res||!res.ok)throw new Error((res&&res.error)||'삭제 동기화 실패');
         delete pendingDeletes[key];
         savePendingDeletes();
+        if(localDeleteTombstones[key]){
+          delete localDeleteTombstones[key];
+          localStorage.setItem(LOCAL_DELETE_KEY,JSON.stringify(localDeleteTombstones));
+        }
       }catch(err){
         allOk=false;
         if(pendingDeletes[key]){
@@ -127,7 +211,7 @@ let expandedSummaryCategory = '';
 const API_URL = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.API_URL) || '';
 let PIN_HASH = (window.BUDGET_CONFIG && window.BUDGET_CONFIG.PIN_HASH) || '';
 const DEFAULT_PIN_HASH = PIN_HASH;
-const APP_VERSION = 'v29.0 · 2026-08-29';
+const APP_VERSION = 'v31.0 · 2026-08-30';
 const PIN_SESSION_KEY = 'coupleBudget_pin_ok_v1';
 const PIN_CACHE_KEY = 'coupleBudget_pin_hash_cache_v1';
 const cachedPinHash = localStorage.getItem(PIN_CACHE_KEY) || '';
@@ -145,7 +229,8 @@ function snapshotExpenseDraft(form){
     date:String(f.get('date')||''),
     method:String(f.get('method')||''),
     memo:String(f.get('memo')||''),
-    reimbursedAmount:String(f.get('reimbursedAmount')||'')
+    reimbursedAmount:String(f.get('reimbursedAmount')||''),
+    installmentCount:String(f.get('installmentCount')||'1')
   };
   formDirty=true;
 }
@@ -259,6 +344,10 @@ async function changeSharedPin(currentPin,newPin){
 
 
 function apiConfigured(){ return /^https:\/\/script\.google\.com\/macros\/s\/.+\/exec/.test(API_URL); }
+
+function pendingMutationCount(){
+  return Object.keys(pendingUpserts||{}).length+Object.keys(pendingDeletes||{}).length;
+}
 function setSyncStatus(text, ok=true){
   const el=document.getElementById('syncStatus');
   const retry=document.getElementById('retrySyncBtn');
@@ -269,8 +358,60 @@ function setSyncStatus(text, ok=true){
   }
   if(retry)retry.hidden=ok;
 }
+
+function pendingUpsertRecordsByEntity(entity){
+  return Object.values(pendingUpserts||{})
+    .filter(item=>item&&item.entity===entity&&item.record)
+    .map(item=>structuredClone(item.record));
+}
+function applyPendingUpsertsToGrouped(grouped,entity){
+  const out=normalizeGroupedMonths(grouped||{});
+  pendingUpsertRecordsByEntity(entity).forEach(rec=>{
+    const month=normalizeMonthKey(rec.month);
+    if(!month)return;
+    const arr=out[month]||[];
+    const i=arr.findIndex(x=>String(x.id)===String(rec.id));
+    if(i>=0)arr[i]={...arr[i],...rec,month};
+    else arr.push({...rec,month});
+    out[month]=arr;
+  });
+  return out;
+}
+function reconcileServerState(remoteState){
+  // 서버가 확정 상태의 기준이다.
+  // 로컬에서 서버 확인을 아직 못 받은 outbox 항목만 서버 상태 위에 다시 적용한다.
+  const next=normalizeStateModel({...structuredClone(defaultState),...(remoteState||{})});
+
+  pendingUpsertRecordsByEntity('variableExpenses').forEach(rec=>{
+    const i=next.variableExpenses.findIndex(x=>String(x.id)===String(rec.id));
+    if(i>=0)next.variableExpenses[i]={...next.variableExpenses[i],...rec};
+    else next.variableExpenses.push({...rec});
+  });
+
+  pendingUpsertRecordsByEntity('cardRecords').forEach(rec=>{
+    const i=next.cardRecords.findIndex(x=>String(x.id)===String(rec.id));
+    if(i>=0)next.cardRecords[i]={...next.cardRecords[i],...rec};
+    else next.cardRecords.push({...rec});
+  });
+
+  next.incomes=applyPendingUpsertsToGrouped(next.incomes,'incomes');
+  next.fixedExpenses=applyPendingUpsertsToGrouped(next.fixedExpenses,'fixedExpenses');
+
+  // 삭제 대기 중인 항목은 서버가 아직 응답하지 않았더라도 화면에서 계속 숨긴다.
+  next.variableExpenses=(next.variableExpenses||[]).filter(x=>!isLocallyDeleted('variableExpenses',x.id));
+  next.cardRecords=(next.cardRecords||[]).filter(x=>!isLocallyDeleted('cardRecords',x.id));
+  Object.keys(next.incomes||{}).forEach(m=>{
+    next.incomes[m]=(next.incomes[m]||[]).filter(x=>!isLocallyDeleted('incomes',x.id));
+  });
+  Object.keys(next.fixedExpenses||{}).forEach(m=>{
+    next.fixedExpenses[m]=(next.fixedExpenses[m]||[]).filter(x=>!isLocallyDeleted('fixedExpenses',x.id));
+  });
+
+  return normalizeStateModel(next);
+}
+
 function remoteLoad(){
-  flushPendingDeletes({quiet:true}).catch(()=>{});
+  flushPendingMutations({quiet:true}).catch(()=>{});
   if(formDirty){ setSyncStatus('입력 중 · 자동 동기화 잠시 멈춤'); return Promise.resolve(false); }
   if(!apiConfigured()){ setSyncStatus('설정 필요: config.js에 Apps Script 주소 입력', false); return Promise.resolve(false); }
   return new Promise((resolve,reject)=>{
@@ -278,7 +419,7 @@ function remoteLoad(){
     const sc=document.createElement('script');
     const timer=setTimeout(()=>{ cleanup(); reject(new Error('연결 시간 초과')); },12000);
     const cleanup=()=>{ clearTimeout(timer); try{delete window[cb]}catch{}; sc.remove(); };
-    window[cb]=(res)=>{ cleanup(); if(res && res.ok && res.data){ state=mergeStateNoLoss(state,res.data); localStorage.setItem(STORAGE_KEY,JSON.stringify(state)); setSyncStatus('Google Sheets 동기화됨'); if(!formDirty)render(); resolve(true); } else { reject(new Error((res&&res.error)||'불러오기 실패')); } };
+    window[cb]=(res)=>{ cleanup(); if(res && res.ok && res.data){ state=reconcileServerState(res.data); localStorage.setItem(STORAGE_KEY,JSON.stringify(state)); setSyncStatus(pendingMutationCount()?`Google Sheets 동기화됨 · ${pendingMutationCount()}건 전송 대기`:'Google Sheets 동기화됨'); if(!formDirty)render(); resolve(true); } else { reject(new Error((res&&res.error)||'불러오기 실패')); } };
     sc.onerror=()=>{ cleanup(); reject(new Error('연결 실패')); };
     sc.src=API_URL+'?action=getState&callback='+encodeURIComponent(cb)+'&_='+Date.now();
     document.head.appendChild(sc);
@@ -290,7 +431,7 @@ function remoteSave(){
   syncing=true; pendingSave=false; setSyncStatus('Google Sheets 저장 중…');
   const snapshot=structuredClone(state);
   fetch(API_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'mergeState',payload:snapshot})})
-    .then(()=>{setSyncStatus('Google Sheets 저장됨');})
+    .then(()=>{setSyncStatus('Google Sheets 저장 요청됨');})
     .catch(err=>{setSyncStatus('저장 오류 · 로컬에는 저장됨',false); console.error(err);})
     .finally(()=>{
       syncing=false;
@@ -368,10 +509,9 @@ if(retrySyncBtn)retrySyncBtn.onclick=async()=>{
   retrySyncBtn.disabled=true;
   setSyncStatus('재동기화 중…');
   try{
-    await flushPendingDeletes();
-    await remoteLoad();
-    remoteSave();
-    toast('재동기화를 요청했습니다.');
+    await flushPendingMutations();
+    const ok=await remoteLoad();
+    toast(ok?'서버 데이터를 다시 불러왔습니다.':'서버 연결에 실패했습니다. 잠시 후 다시 시도해 주세요.');
   }finally{
     retrySyncBtn.disabled=false;
   }
@@ -587,11 +727,44 @@ document.getElementById('menuBtn').onclick=()=>{
   document.body.classList.add('menu-open');
 };
 document.getElementById('backdrop').onclick=closeMenu;
+initGlobalAdd();
 function closeMenu(){
   document.getElementById('sidebar').classList.remove('open');
   document.getElementById('backdrop').classList.remove('show');
   document.body.classList.remove('menu-open');
 }
+function initGlobalAdd(){
+  const btn=document.getElementById('globalAddBtn');
+  const menu=document.getElementById('globalAddMenu');
+  if(!btn||!menu)return;
+  const close=()=>{menu.hidden=true;btn.classList.remove('open');};
+  btn.onclick=e=>{
+    e.stopPropagation();
+    menu.hidden=!menu.hidden;
+    btn.classList.toggle('open',!menu.hidden);
+  };
+  menu.querySelectorAll('button[data-page]').forEach(item=>item.onclick=()=>{
+    activePage=item.dataset.page;
+    formDirty=false;
+    clearExpenseDraft();
+    close();
+    closeMenu();
+    window.scrollTo({top:0,left:0,behavior:'auto'});
+    document.documentElement.scrollTop=0;document.body.scrollTop=0;
+    render();
+    setTimeout(()=>{
+      const target=document.querySelector('#expenseForm,#fixedForm,#incomeForm,#cardForm');
+      if(target){
+        target.closest('.card')?.classList.add('quick-add-target');
+        const input=target.querySelector('input:not([type="hidden"]):not([type="checkbox"]),select');
+        if(input)input.focus({preventScroll:true});
+        setTimeout(()=>target.closest('.card')?.classList.remove('quick-add-target'),900);
+      }
+    },0);
+  });
+  document.addEventListener('click',e=>{if(!e.target.closest('#globalAddWrap'))close();});
+}
+
 function previousMonth(month){ const [y,m]=month.split('-').map(Number); const d=new Date(y,m-2,1); return `${d.getFullYear()}-${pad(d.getMonth()+1)}`; }
 function dateInMonthLike(date, month){ const day=Math.max(1,Number(String(date||'').slice(8,10))||1); const [y,m]=month.split('-').map(Number); const last=new Date(y,m,0).getDate(); return `${month}-${pad(Math.min(day,last))}`; }
 function categoryDisplayName(cat){ return cat==='고정'?'카드고정지출':cat; }
@@ -602,6 +775,26 @@ function expenseDisplayName(x){
   if(x.category==='이벤트'&&x.eventCategory) return `이벤트(${x.eventCategory})`;
   return x.category||'';
 }
+function addMonthsClampedDate(date,offset){
+  const s=String(date||'');
+  const [y,m,d]=s.split('-').map(Number);
+  if(!y||!m||!d)return s;
+  const target=new Date(y,m-1+Number(offset||0),1);
+  const last=new Date(target.getFullYear(),target.getMonth()+1,0).getDate();
+  return `${target.getFullYear()}-${pad(target.getMonth()+1)}-${pad(Math.min(d,last))}`;
+}
+function splitIntegerAmount(total,count){
+  total=Math.max(0,Math.round(Number(total)||0));
+  count=Math.max(1,Math.round(Number(count)||1));
+  const base=Math.floor(total/count);
+  return Array.from({length:count},(_,i)=>i===count-1?total-base*(count-1):base);
+}
+function installmentLabel(x){
+  const count=Number(x&&x.installmentCount)||1;
+  const index=Number(x&&x.installmentIndex)||1;
+  return count>1?`할부 ${index}/${count}`:'';
+}
+
 function expenseCreatedMs(x){
   const c=Date.parse(String(x&&x.createdAt||''));
   if(Number.isFinite(c)) return c;
@@ -619,9 +812,30 @@ function expenseCategoryOrder(x){
   const order={고정:0,생활비:1,식비:2,이벤트:3};
   return Object.prototype.hasOwnProperty.call(order,x.category)?order[x.category]:9;
 }
+function expenseSubcategoryRank(x){
+  if(x.category==='생활비'){
+    const order=['가정','남편개인','자녀']; const i=order.indexOf(x.detailCategory||'가정'); return i<0?99:i;
+  }
+  if(x.category==='식비'){
+    const order=['가정','자녀']; const i=order.indexOf(x.detailCategory||'가정'); return i<0?99:i;
+  }
+  if(x.category==='이벤트'){
+    const order=state.settings.eventCategories||[]; const i=order.indexOf(x.eventCategory||''); return i<0?99:i;
+  }
+  return 0;
+}
+function expenseSubcategoryName(x){
+  if(x.category==='생활비'||x.category==='식비')return String(x.detailCategory||'가정');
+  if(x.category==='이벤트')return String(x.eventCategory||'');
+  return '';
+}
 function sortExpensesByCategory(a,b){
   const c=expenseCategoryOrder(a)-expenseCategoryOrder(b);
   if(c) return c;
+  const sr=expenseSubcategoryRank(a)-expenseSubcategoryRank(b);
+  if(sr)return sr;
+  const sn=expenseSubcategoryName(a).localeCompare(expenseSubcategoryName(b),'ko');
+  if(sn)return sn;
   const dateDiff=String(a.date||'').localeCompare(String(b.date||''));
   if(dateDiff) return dateDiff;
   return String(a.id||'').localeCompare(String(b.id||''));
@@ -757,6 +971,15 @@ function renderAdd(){
               <div class="helper-text">가계부 지출에는 결제액에서 회수금액을 뺀 금액만 반영됩니다.</div>
             </div>
           </div>
+          <div class="field full installment-field">
+            <label class="settlement-toggle"><input type="checkbox" id="installmentToggle" ${Number(draft.installmentCount||1)>1?'checked':''}><span>카드 할부</span></label>
+            <div id="installmentCountWrap" class="${Number(draft.installmentCount||1)>1?'':'hidden'}">
+              <label class="inline-installment-label">할부 개월 수
+                <select name="installmentCount">${Array.from({length:23},(_,i)=>i+2).map(n=>`<option value="${n}" ${Number(draft.installmentCount||1)===n?'selected':''}>${n}개월</option>`).join('')}</select>
+              </label>
+              <div class="helper-text">총 결제금액을 월별로 나누어 각 달의 변동지출과 생활예산에 반영합니다.</div>
+            </div>
+          </div>
           </div>
           <div id="expenseFormMsg" class="helper-text"></div>
           <div class="button-row"><button type="submit" class="btn primary">지출 등록</button></div>
@@ -803,6 +1026,13 @@ function renderAdd(){
     if(!settlementToggle.checked && form.elements.reimbursedAmount) form.elements.reimbursedAmount.value='';
     snapshotExpenseDraft(form);
   };
+  const installmentToggle=document.getElementById('installmentToggle');
+  const installmentWrap=document.getElementById('installmentCountWrap');
+  installmentToggle.onchange=()=>{
+    installmentWrap.classList.toggle('hidden',!installmentToggle.checked);
+    if(!installmentToggle.checked && form.elements.installmentCount)form.elements.installmentCount.value='2';
+    snapshotExpenseDraft(form);
+  };
 
 
   form.onsubmit=e=>{
@@ -819,16 +1049,26 @@ function renderAdd(){
     if(!Number.isFinite(amount) || amount<=0){ msg.textContent='사용금액을 1원 이상 입력해 주세요.'; msg.className='helper-text error'; form.elements.amount.focus(); return; }
     if(!date){ msg.textContent='사용날짜를 선택해 주세요.'; msg.className='helper-text error'; form.elements.date.focus(); return; }
     if(!method){ msg.textContent='지출방식을 선택해 주세요.'; msg.className='helper-text error'; form.elements.method.focus(); return; }
+    const installmentCount=installmentToggle.checked?Math.max(2,Number(f.get('installmentCount'))||2):1;
     const createdNow=new Date().toISOString();
-    state.variableExpenses.push({
+    const memo=String(f.get('memo')||'').trim();
+    const groupId=installmentCount>1?id():'';
+    const amounts=splitIntegerAmount(amount,installmentCount);
+    const reimbursements=splitIntegerAmount(reimbursedAmount,installmentCount);
+    const records=amounts.map((part,index)=>({
       id:id(),category:parsed.category,detailCategory:parsed.detailCategory,eventCategory:parsed.eventCategory,
-      amount,reimbursedAmount,date,memo:String(f.get('memo')||'').trim(),method,
+      amount:part,reimbursedAmount:reimbursements[index]||0,date:addMonthsClampedDate(date,index),memo,method,
+      installmentGroupId:groupId,installmentIndex:index+1,installmentCount,
+      originalAmount:installmentCount>1?amount:0,purchaseDate:installmentCount>1?date:'',
       createdAt:createdNow,updatedAt:createdNow
-    });
+    }));
+    state.variableExpenses.push(...records);
     formDirty=false;
     clearExpenseDraft();
-    saveState();
-    toast('변동지출을 등록했습니다.');
+    saveLocalOnly();
+    queuePendingUpserts('variableExpenses',records);
+    flushPendingUpserts().catch(console.error);
+    toast(installmentCount>1?`${installmentCount}개월 할부로 등록했습니다.`:'변동지출을 등록했습니다.');
     renderAdd();
   };
   document.getElementById('editLimitCard').onclick=async()=>{
@@ -849,7 +1089,10 @@ function renderAdd(){
     if(!confirm(`${prev} 카드고정지출 ${src.length}건을 ${selectedMonth}로 복사할까요?`)) return;
     const existing=state.variableExpenses.filter(x=>monthOf(x.date)===selectedMonth&&x.category==='고정'); let added=0;
     src.forEach(x=>{ if(existing.some(e=>e.memo===x.memo&&Number(e.amount)===Number(x.amount)&&e.method===x.method)) return; state.variableExpenses.push({...x,id:id(),date:dateInMonthLike(x.date,selectedMonth),createdAt:'',updatedAt:''}); added++; });
-    if(added){saveState();renderAdd();toast(`${added}건을 복사했습니다.`);} else alert('이미 같은 카드고정지출이 등록되어 있습니다.');
+    if(added){
+      const addedRows=state.variableExpenses.filter(x=>monthOf(x.date)===selectedMonth&&x.category==='고정'&&!existing.some(e=>e.id===x.id));
+      saveLocalOnly();queuePendingUpserts('variableExpenses',addedRows);flushPendingUpserts().catch(console.error);renderAdd();toast(`${added}건을 복사했습니다.`);
+    } else alert('이미 같은 카드고정지출이 등록되어 있습니다.');
   };
   document.getElementById('goDetails').onclick=()=>{formDirty=false;clearExpenseDraft();activePage='details';render()};
 }
@@ -910,15 +1153,30 @@ function renderDetails(){
     <div class="grid cols-3"><div class="card metric"><div class="metric-label">총 변동지출</div><div class="metric-value">${won(total)}</div></div><div class="card metric"><div class="metric-label">등록 건수</div><div class="metric-value">${rows.length}건</div></div><div class="card metric"><div class="metric-label">일 평균 지출</div><div class="metric-value">${won(rows.length?total/new Date(+selectedMonth.slice(0,4),+selectedMonth.slice(5,7),0).getDate():0)}</div></div></div>
     <div class="card section-gap category-summary-section"><div class="card-head"><div><h2>대분류별 지출</h2><p>${year}년 실제 기록이 있는 월 기준 월평균과 비교합니다.</p></div></div><div class="category-summary-grid category-summary-grid-variable variable-summary-4x1">${cards}</div></div>
     <div class="section-gap">${categoryTrendChart('variableExpenses',['고정','생활비','식비','이벤트'],year,selectedMonth,'변동지출 대분류 월별 추이')}</div>
-    <div class="card section-gap"><div class="card-head details-head"><div><h2>${selectedMonth} 세부 내역</h2><p>사용날짜·분류·실제 등록시간 기준으로 정렬할 수 있습니다.</p></div><div class="segmented details-sort"><button type="button" class="${detailsSortMode==='latest'?'active':''}" data-sort="latest">사용일 최신</button><button type="button" class="${detailsSortMode==='category'?'active':''}" data-sort="category">분류별</button><button type="button" class="${detailsSortMode==='registered'?'active':''}" data-sort="registered">등록 최신</button></div></div><div class="table-wrap">${rows.length?`<table class="table"><thead><tr><th>날짜</th><th>분류</th><th>사용내역</th><th>지출방식</th><th class="amount">금액</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.date)}</td><td><span class="pill ${categoryPillClass(x)}">${esc(expenseDisplayName(x))}</span></td><td>${esc(x.memo||'-')}</td><td>${esc(x.method)}</td><td class="amount"><strong>${won(effectiveExpenseAmount(x))}</strong>${reimbursementAmount(x)>0?`<div class="muted tiny-note">결제 ${won(x.amount)} · 회수 ${won(reimbursementAmount(x))}</div>`:''}</td><td><div class="row-actions"><button class="btn small edit-exp" data-id="${x.id}">수정</button><button class="btn small danger delete-exp" data-id="${x.id}">삭제</button></div></td></tr>`).join('')}</tbody></table>`:`<div class="empty">${selectedMonth}에 등록된 내역이 없습니다.</div>`}</div></div>`;
+    <div class="card section-gap"><div class="card-head details-head"><div><h2>${selectedMonth} 세부 내역</h2><p>사용날짜·분류·실제 등록시간 기준으로 정렬할 수 있습니다.</p></div><div class="segmented details-sort"><button type="button" class="${detailsSortMode==='latest'?'active':''}" data-sort="latest">사용일 최신</button><button type="button" class="${detailsSortMode==='category'?'active':''}" data-sort="category">분류별</button><button type="button" class="${detailsSortMode==='registered'?'active':''}" data-sort="registered">등록 최신</button></div></div><div class="table-wrap">${rows.length?`<table class="table"><thead><tr><th>날짜</th><th>분류</th><th>사용내역</th><th>지출방식</th><th class="amount">금액</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.date)}</td><td><span class="pill ${categoryPillClass(x)}">${esc(expenseDisplayName(x))}</span></td><td>${esc(x.memo||'-')}${installmentLabel(x)?`<div class="installment-note">${esc(installmentLabel(x))}${x.purchaseDate?` · 결제 ${esc(x.purchaseDate)}`:''}</div>`:''}</td><td>${esc(x.method)}</td><td class="amount"><strong>${won(effectiveExpenseAmount(x))}</strong>${reimbursementAmount(x)>0?`<div class="muted tiny-note">결제 ${won(x.amount)} · 회수 ${won(reimbursementAmount(x))}</div>`:''}</td><td><div class="row-actions"><button class="btn small edit-exp" data-id="${x.id}">수정</button><button class="btn small danger delete-exp" data-id="${x.id}">삭제</button></div></td></tr>`).join('')}</tbody></table>`:`<div class="empty">${selectedMonth}에 등록된 내역이 없습니다.</div>`}</div></div>`;
   document.querySelectorAll('.details-sort button').forEach(b=>b.onclick=()=>{detailsSortMode=b.dataset.sort||'latest';renderDetails();});
-  document.querySelectorAll('.delete-exp').forEach(b=>b.onclick=()=>{if(confirm('이 지출 내역을 삭제할까요?')){const rid=b.dataset.id;markLocalDeleted('variableExpenses',rid);state.variableExpenses=state.variableExpenses.filter(x=>x.id!==rid);saveLocalOnly();renderDetails();flushPendingDeletes().catch(console.error)}});
+  document.querySelectorAll('.delete-exp').forEach(b=>b.onclick=()=>{
+    const rid=b.dataset.id;
+    const target=state.variableExpenses.find(x=>x.id===rid);
+    const groupId=target&&target.installmentGroupId;
+    const targets=groupId?state.variableExpenses.filter(x=>x.installmentGroupId===groupId):[target].filter(Boolean);
+    const message=groupId?`${Number(target.installmentCount)||targets.length}개월 할부 전체 내역을 삭제할까요?`:'이 지출 내역을 삭제할까요?';
+    if(!confirm(message))return;
+    const ids=new Set(targets.map(x=>String(x.id)));
+    targets.forEach(x=>markLocalDeleted('variableExpenses',x.id));
+    state.variableExpenses=state.variableExpenses.filter(x=>!ids.has(String(x.id)));
+    saveLocalOnly();renderDetails();flushPendingDeletes().catch(console.error);
+  });
   document.querySelectorAll('.edit-exp').forEach(b=>b.onclick=()=>renderExpenseEdit(b.dataset.id));
 }
 
 function renderExpenseEdit(expenseId){
   const x=state.variableExpenses.find(v=>v.id===expenseId);
   if(!x){ renderDetails(); return; }
+  if(Number(x.installmentCount||1)>1){
+    alert('할부 내역은 여러 달의 예산과 연결되어 있어 현재는 개별 수정하지 않습니다. 전체 할부를 삭제한 뒤 다시 등록해 주세요.');
+    renderDetails();return;
+  }
   const options=expenseCategoryOptions();
   const currentChoice=x.category==='이벤트'?`이벤트::${x.eventCategory||''}`:(x.category==='생활비'||x.category==='식비'?`${x.category}::${x.detailCategory||'가정'}`:x.category);
   app.innerHTML=`<div class="card expense-edit-card">
@@ -952,7 +1210,9 @@ function renderExpenseEdit(expenseId){
     }
     Object.assign(x,{category:parsed.category,detailCategory:parsed.detailCategory,eventCategory:parsed.eventCategory,amount,reimbursedAmount,date,method,memo:String(f.get('memo')||'').trim(),updatedAt:new Date().toISOString()});
     formDirty=false;
-    saveState();
+    saveLocalOnly();
+    queuePendingUpserts('variableExpenses',[x]);
+    flushPendingUpserts().catch(console.error);
     toast('지출 내역을 수정했습니다.');
     selectedMonth=monthOf(date)||selectedMonth;
     globalMonth.value=selectedMonth;
@@ -1407,8 +1667,9 @@ function renderIncome(){
     if(!name){toast('수입 항목을 입력해 주세요.');e.target.elements.name.focus();return;}
     if(!Number.isFinite(amount)||amount<0){toast('올바른 수입 금액을 입력해 주세요.');e.target.elements.amount.focus();return;}
     const now=new Date().toISOString();
-    state.incomes[selectedMonth]=[...(state.incomes[selectedMonth]||[]),{id:id(),category,name,amount,createdAt:now,updatedAt:now}];
-    formDirty=false;saveState();renderIncome();
+    const rec={id:id(),month:selectedMonth,category,name,amount,createdAt:now,updatedAt:now};
+    state.incomes[selectedMonth]=[...(state.incomes[selectedMonth]||[]),rec];
+    formDirty=false;saveLocalOnly();queuePendingUpserts('incomes',[rec]);flushPendingUpserts().catch(console.error);renderIncome();
   };
   document.querySelectorAll('.simple-sort button').forEach(b=>b.onclick=()=>{incomeSortMode=b.dataset.sort;renderIncome();});
   bindEditor('income');
@@ -1449,8 +1710,9 @@ function renderFixed(){
     if(!name){toast('지출 항목을 입력해 주세요.');e.target.elements.name.focus();return;}
     if(!Number.isFinite(amount)||amount<0){toast('올바른 금액을 입력해 주세요.');e.target.elements.amount.focus();return;}
     const now=new Date().toISOString();
-    state.fixedExpenses[selectedMonth]=[...(state.fixedExpenses[selectedMonth]||[]),{id:id(),category,name,amount,createdAt:now,updatedAt:now}];
-    formDirty=false;saveState();renderFixed();
+    const rec={id:id(),month:selectedMonth,category,name,amount,createdAt:now,updatedAt:now};
+    state.fixedExpenses[selectedMonth]=[...(state.fixedExpenses[selectedMonth]||[]),rec];
+    formDirty=false;saveLocalOnly();queuePendingUpserts('fixedExpenses',[rec]);flushPendingUpserts().catch(console.error);renderFixed();
   };
   const cfb=document.getElementById('copyFixedBtn');
   if(cfb)cfb.onclick=()=>{
@@ -1459,7 +1721,8 @@ function renderFixed(){
     if(!confirm(`${prev} 기본지출 ${src.length}개를 가져올까요?`))return;
     const cur=state.fixedExpenses[selectedMonth]||[],now=new Date().toISOString();
     const add=src.filter(x=>!cur.some(c=>c.name===x.name&&c.category===x.category)).map(x=>({id:id(),category:x.category||defaultCat,name:x.name,amount:Number(x.amount)||0,createdAt:now,updatedAt:now}));
-    state.fixedExpenses[selectedMonth]=[...cur,...add];saveState();renderFixed();toast(`${add.length}개 항목을 복사했습니다.`);
+    add.forEach(x=>x.month=selectedMonth);
+    state.fixedExpenses[selectedMonth]=[...cur,...add];saveLocalOnly();queuePendingUpserts('fixedExpenses',add);flushPendingUpserts().catch(console.error);renderFixed();toast(`${add.length}개 항목을 복사했습니다.`);
   };
   document.querySelectorAll('.simple-sort button').forEach(b=>b.onclick=()=>{fixedSortMode=b.dataset.sort;renderFixed();});
   bindEditor('fixed');
@@ -1513,8 +1776,11 @@ function renderSimpleRecordEdit(type,recordId){
     e.preventDefault();
     const f=new FormData(form),category=String(f.get('category')||cats[0]),name=String(f.get('name')||'').trim(),amount=parseAmount(f.get('amount'));
     if(!name||!Number.isFinite(amount)||amount<0){toast('항목명과 금액을 확인해 주세요.');return;}
-    Object.assign(x,{category,name,amount,updatedAt:new Date().toISOString()});
-    formDirty=false;saveState();toast('수정했습니다.');
+    Object.assign(x,{category,name,amount,month:selectedMonth,updatedAt:new Date().toISOString()});
+    formDirty=false;saveLocalOnly();
+    queuePendingUpserts(type==='income'?'incomes':'fixedExpenses',[x]);
+    flushPendingUpserts().catch(console.error);
+    toast('수정했습니다.');
     type==='income'?renderIncome():renderFixed();
   };
 }
@@ -1635,8 +1901,8 @@ function renderCards(){
     const rec={id:id(),month:selectedMonth,owner,cardType,card:owner+'카드',amount,memo,createdAt:new Date().toISOString()};
     state.cardRecords.push(rec);
     formDirty=false;saveLocalOnly();renderCards();
-    remoteUpsertCardRecord(rec).then(()=>setSyncStatus('카드 기록 저장됨')).catch(err=>{setSyncStatus('카드 기록 저장 오류',false);console.error(err);});
-    remoteSave();
+    queuePendingUpserts('cardRecords',[rec]);
+    flushPendingUpserts().catch(err=>{setSyncStatus('카드 기록 저장 재시도 대기',false);console.error(err);});
   };
 
   document.querySelectorAll('.delete-card-record').forEach(b=>b.onclick=()=>{
@@ -1695,8 +1961,8 @@ function renderCardRecordEdit(recordId){
     if(!Number.isFinite(amount)||amount<0){toast('올바른 카드 금액을 입력해 주세요.');return;}
     Object.assign(x,{owner:newOwner,cardType:newType,card:newOwner+'카드',amount,memo,updatedAt:new Date().toISOString()});
     formDirty=false;saveLocalOnly();toast('카드 기록을 수정했습니다.');renderCards();
-    remoteUpsertCardRecord(x).catch(err=>{setSyncStatus('카드 기록 수정 오류',false);console.error(err);});
-    remoteSave();
+    queuePendingUpserts('cardRecords',[x]);
+    flushPendingUpserts().catch(err=>{setSyncStatus('카드 기록 수정 재시도 대기',false);console.error(err);});
   };
 }
 
@@ -1849,6 +2115,6 @@ function renderSettings(){
 
 render();
 initPinGate().then(()=>{ if(!PIN_HASH || sessionStorage.getItem(PIN_SESSION_KEY)==='1') remoteLoad(); });
-setInterval(()=>{ if(document.visibilityState==='visible' && !syncing && (!PIN_HASH || sessionStorage.getItem(PIN_SESSION_KEY)==='1')) remoteLoad(); },30000);
-setInterval(()=>{ if(document.visibilityState==='visible') flushPendingDeletes({quiet:true}).catch(()=>{}); },20000);
-document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ flushPendingDeletes({quiet:true}).catch(()=>{}); if(!syncing && (!PIN_HASH || sessionStorage.getItem(PIN_SESSION_KEY)==='1')) remoteLoad(); } });
+setInterval(()=>{ if(document.visibilityState==='visible' && !syncing && (!PIN_HASH || sessionStorage.getItem(PIN_SESSION_KEY)==='1')) remoteLoad(); },120000);
+setInterval(()=>{ if(document.visibilityState==='visible') flushPendingMutations({quiet:true}).catch(()=>{}); },30000);
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ flushPendingMutations({quiet:true}).catch(()=>{}); if(!syncing && (!PIN_HASH || sessionStorage.getItem(PIN_SESSION_KEY)==='1')) remoteLoad(); } });
